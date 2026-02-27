@@ -1,0 +1,18 @@
+[package]
+name = "klaw-tools"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Tool trait and implementations (exec, read, write, web, browser, etc.)"
+
+[dependencies]
+klaw-core = { path = "../klaw-core" }
+
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+async-trait = { workspace = true }
+tracing = { workspace = true }
+anyhow = { workspace = true }
+reqwest = { workspace = true }

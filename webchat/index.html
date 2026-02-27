@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Klaw — AI Gateway</title>
+    <style>
+        :root {
+            --bg: #0f0f1a;
+            --surface: #1a1a2e;
+            --surface2: #232342;
+            --border: #2d2d4a;
+            --text: #e0e0f0;
+            --text2: #8888aa;
+            --accent: #f97316;
+            --accent2: #fb923c;
+            --user-bg: #1e3a5f;
+            --bot-bg: #1a2e1a;
+            --error: #ef4444;
+            --success: #4ade80;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        header {
+            background: var(--surface);
+            border-bottom: 1px solid var(--border);
+            padding: 12px 20px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        header h1 { font-size: 18px; font-weight: 600; }
+        header .logo { font-size: 24px; }
+        header .status {
+            margin-left: auto;
+            font-size: 12px;
+            padding: 4px 10px;
+            border-radius: 12px;
+            background: var(--surface2);
+        }
+        header .status.connected { color: var(--success); }
+        header .status.disconnected { color: var(--error); }
+
+        #messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        .msg {
+            max-width: 80%;
+            padding: 10px 14px;
+            border-radius: 12px;
+            font-size: 14px;
+            line-height: 1.5;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+        .msg.user {
+            align-self: flex-end;
+            background: var(--user-bg);
+            border-bottom-right-radius: 4px;
+        }
+        .msg.assistant {
+            align-self: flex-start;
+            background: var(--bot-bg);
+            border-bottom-left-radius: 4px;
+        }
+        .msg.system {
+            align-self: center;
+            background: var(--surface2);
+            color: var(--text2);
+            font-size: 12px;
+            padding: 6px 12px;
+        }
+        .msg.error {
+            align-self: center;
+            background: #3a1a1a;
+            color: var(--error);
+            font-size: 12px;
+        }
+        .msg .label {
+            font-size: 11px;
+            color: var(--text2);
+            margin-bottom: 4px;
+        }
+        .msg code {
+            background: rgba(0,0,0,0.3);
+            padding: 1px 4px;
+            border-radius: 3px;
+            font-size: 13px;
+        }
+        .msg pre {
+            background: rgba(0,0,0,0.3);
+            padding: 8px;
+            border-radius: 6px;
+            overflow-x: auto;
+            margin: 6px 0;
+        }
+        .typing {
+            align-self: flex-start;
+            color: var(--text2);
+            font-size: 13px;
+            padding: 8px 14px;
+        }
+        .typing span {
+            animation: blink 1.4s infinite;
+        }
+        .typing span:nth-child(2) { animation-delay: 0.2s; }
+        .typing span:nth-child(3) { animation-delay: 0.4s; }
+        @keyframes blink { 0%,60%,100% { opacity: 0.2; } 30% { opacity: 1; } }
+
+        #input-area {
+            background: var(--surface);
+            border-top: 1px solid var(--border);
+            padding: 12px 20px;
+            display: flex;
+            gap: 10px;
+        }
+        #input {
+            flex: 1;
+            background: var(--surface2);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 10px 14px;
+            color: var(--text);
+            font-size: 14px;
+            font-family: inherit;
+            resize: none;
+            outline: none;
+            min-height: 42px;
+            max-height: 150px;
+        }
+        #input:focus { border-color: var(--accent); }
+        #input::placeholder { color: var(--text2); }
+        #send-btn {
+            background: var(--accent);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            padding: 10px 20px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        #send-btn:hover { background: var(--accent2); }
+        #send-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    </style>
+</head>
+<body>
+    <header>
+        <span class="logo">🦀</span>
+        <h1>Klaw</h1>
+        <div id="status" class="status disconnected">● Disconnected</div>
+    </header>
+
+    <div id="messages">
+        <div class="msg system">Welcome to Klaw. Type a message to start.</div>
+    </div>
+
+    <div id="input-area">
+        <textarea id="input" placeholder="Type a message..." rows="1"></textarea>
+        <button id="send-btn" onclick="sendMessage()">Send</button>
+    </div>
+
+    <script>
+        let ws = null;
+        let reqId = 0;
+        let streaming = '';
+        let streamEl = null;
+
+        const messagesEl = document.getElementById('messages');
+        const inputEl = document.getElementById('input');
+        const statusEl = document.getElementById('status');
+        const sendBtn = document.getElementById('send-btn');
+
+        function connect() {
+            const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+            ws = new WebSocket(`${protocol}//${location.host}/ws`);
+
+            ws.onopen = () => {
+                // Send connect request
+                ws.send(JSON.stringify({
+                    type: 'req', id: `${++reqId}`, method: 'connect',
+                    params: {
+                        minProtocol: 3, maxProtocol: 3,
+                        client: { id: 'webchat', version: '0.1.0', platform: 'web', mode: 'operator' },
+                        role: 'operator', scopes: ['operator.read', 'operator.write'],
+                        caps: [], commands: [], permissions: {}, auth: {}
+                    }
+                }));
+            };
+
+            ws.onmessage = (e) => {
+                try {
+                    const data = JSON.parse(e.data);
+                    handleFrame(data);
+                } catch (err) {
+                    console.error('Parse error:', err);
+                }
+            };
+
+            ws.onclose = () => {
+                statusEl.textContent = '● Disconnected';
+                statusEl.className = 'status disconnected';
+                setTimeout(connect, 3000);
+            };
+
+            ws.onerror = () => {
+                addMessage('system', 'Connection error. Retrying...');
+            };
+        }
+
+        function handleFrame(data) {
+            if (data.type === 'event' && data.event === 'connect.challenge') {
+                // Challenge received, connect request will be sent
+                return;
+            }
+
+            if (data.type === 'res' && data.payload?.type === 'hello-ok') {
+                statusEl.textContent = '● Connected';
+                statusEl.className = 'status connected';
+                return;
+            }
+
+            // Agent response
+            if (data.type === 'res' && data.payload?.response) {
+                removeTyping();
+                addMessage('assistant', data.payload.response);
+                sendBtn.disabled = false;
+                return;
+            }
+
+            // Streaming
+            if (data.type === 'event' && data.event === 'agent') {
+                const p = data.payload || {};
+                if (p.stream === 'assistant' && p.delta) {
+                    if (!streamEl) {
+                        removeTyping();
+                        streamEl = addMessage('assistant', '');
+                    }
+                    streaming += p.delta;
+                    streamEl.querySelector('.content').textContent = streaming;
+                    messagesEl.scrollTop = messagesEl.scrollHeight;
+                }
+                if (p.stream === 'lifecycle' && p.phase === 'end') {
+                    streamEl = null;
+                    streaming = '';
+                    sendBtn.disabled = false;
+                }
+            }
+        }
+
+        function sendMessage() {
+            const text = inputEl.value.trim();
+            if (!text || !ws || ws.readyState !== WebSocket.OPEN) return;
+
+            addMessage('user', text);
+            inputEl.value = '';
+            inputEl.style.height = 'auto';
+            sendBtn.disabled = true;
+            showTyping();
+
+            ws.send(JSON.stringify({
+                type: 'req', id: `${++reqId}`, method: 'agent',
+                params: { message: text }
+            }));
+        }
+
+        function addMessage(role, text) {
+            const div = document.createElement('div');
+            div.className = `msg ${role}`;
+            const label = role === 'user' ? 'You' : role === 'assistant' ? '🦀 Klaw' : '';
+            div.innerHTML = label ? `<div class="label">${label}</div><div class="content"></div>` : `<div class="content"></div>`;
+            div.querySelector('.content').textContent = text;
+            messagesEl.appendChild(div);
+            messagesEl.scrollTop = messagesEl.scrollHeight;
+            return div;
+        }
+
+        function showTyping() {
+            const div = document.createElement('div');
+            div.className = 'typing';
+            div.id = 'typing';
+            div.innerHTML = '🦀 <span>.</span><span>.</span><span>.</span>';
+            messagesEl.appendChild(div);
+            messagesEl.scrollTop = messagesEl.scrollHeight;
+        }
+
+        function removeTyping() {
+            document.getElementById('typing')?.remove();
+        }
+
+        // Auto-resize textarea
+        inputEl.addEventListener('input', () => {
+            inputEl.style.height = 'auto';
+            inputEl.style.height = Math.min(inputEl.scrollHeight, 150) + 'px';
+        });
+
+        // Enter to send, Shift+Enter for newline
+        inputEl.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+            }
+        });
+
+        connect();
+    </script>
+</body>
+</html>

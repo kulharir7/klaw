@@ -1,0 +1,19 @@
+[package]
+name = "klaw-channels"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Channel trait and implementations (Telegram, Discord, WebChat, etc.)"
+
+[dependencies]
+klaw-core = { path = "../klaw-core" }
+
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+async-trait = { workspace = true }
+tracing = { workspace = true }
+anyhow = { workspace = true }
+reqwest = { workspace = true }
+chrono = { workspace = true }

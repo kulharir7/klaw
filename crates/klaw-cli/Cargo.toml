@@ -1,0 +1,26 @@
+[package]
+name = "klaw"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Klaw CLI — Multi-channel AI gateway"
+
+[[bin]]
+name = "klaw"
+path = "src/main.rs"
+
+[dependencies]
+klaw-core = { path = "../klaw-core" }
+klaw-gateway = { path = "../klaw-gateway" }
+klaw-agent = { path = "../klaw-agent" }
+klaw-channels = { path = "../klaw-channels" }
+klaw-tools = { path = "../klaw-tools" }
+
+tokio = { workspace = true }
+clap = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
