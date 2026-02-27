@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::RwLock;
-use tracing::{info, warn};
+use tracing::{info, warn, error};
 
 /// Device identity for connected clients/nodes
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -208,6 +208,37 @@ pub async fn start_gateway(config: Config) -> anyhow::Result<()> {
     info!("   A2UI:     http://{}/__klaw__/a2ui/", addr);
     info!("   Webhook:  http://{}/webhook", addr);
     info!("   Health:   http://{}/health", addr);
+
+    // Start Telegram channel if configured
+    if let Some(ref tg_config) = config.channels.telegram {
+        let bot_token = &tg_config.bot_token;
+        if !bot_token.is_empty() {
+            info!("🤖 Starting Telegram channel...");
+            let tg_state = state.clone();
+            let token = bot_token.clone();
+            tokio::spawn(async move {
+                if let Err(e) = run_telegram_loop(token, tg_state).await {
+                    tracing::error!("Telegram channel error: {}", e);
+                }
+            });
+        }
+    }
+
+    // Start cron scheduler
+    {
+        tokio::spawn(async move {
+            match crate::cron_scheduler::CronScheduler::load_jobs() {
+                Ok(mut scheduler) => {
+                    if !scheduler.job_count() == 0 {
+                        info!("⏰ Cron scheduler started ({} jobs)", scheduler.job_count());
+                        let (cron_tx, _cron_rx) = tokio::sync::mpsc::channel::<String>(16);
+                        scheduler.run(cron_tx).await;
+                    }
+                }
+                Err(e) => warn!("Cron scheduler load failed: {}", e),
+            }
+        });
+    }
 
     let result = axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
@@ -734,4 +765,229 @@ async fn handle_ws_connection(mut socket: WebSocket, state: Arc<RwLock<GatewaySt
 async fn shutdown_signal() {
     tokio::signal::ctrl_c().await.expect("Failed to install Ctrl+C handler");
     info!("Received shutdown signal");
+}
+
+/// Telegram long-polling loop — receives messages and runs agent
+async fn run_telegram_loop(bot_token: String, state: Arc<RwLock<GatewayState>>) -> anyhow::Result<()> {
+    let client = reqwest::Client::new();
+    let api_base = format!("https://api.telegram.org/bot{}", bot_token);
+
+    // Get bot info
+    let me: serde_json::Value = client.get(&format!("{}/getMe", api_base))
+        .send().await?.json().await?;
+    let bot_username = me["result"]["username"].as_str().unwrap_or("bot");
+    info!("🤖 Telegram bot connected: @{}", bot_username);
+
+    // Set bot commands
+    let _ = client.post(&format!("{}/setMyCommands", api_base))
+        .json(&serde_json::json!({
+            "commands": [
+                {"command": "start", "description": "Start chatting"},
+                {"command": "new", "description": "New conversation"},
+                {"command": "help", "description": "Show help"},
+                {"command": "status", "description": "Show status"},
+            ]
+        }))
+        .send().await;
+
+    let mut offset: i64 = 0;
+
+    loop {
+        // Long poll for updates
+        let resp = client.post(&format!("{}/getUpdates", api_base))
+            .json(&serde_json::json!({
+                "offset": offset,
+                "timeout": 30,
+                "allowed_updates": ["message", "edited_message", "callback_query"]
+            }))
+            .send()
+            .await;
+
+        let data: serde_json::Value = match resp {
+            Ok(r) => match r.json().await {
+                Ok(d) => d,
+                Err(e) => { warn!("Telegram JSON error: {}", e); tokio::time::sleep(std::time::Duration::from_secs(5)).await; continue; }
+            },
+            Err(e) => { warn!("Telegram poll error: {}", e); tokio::time::sleep(std::time::Duration::from_secs(5)).await; continue; }
+        };
+
+        let updates = match data["result"].as_array() {
+            Some(u) => u.clone(),
+            None => continue,
+        };
+
+        for update in &updates {
+            offset = update["update_id"].as_i64().unwrap_or(0) + 1;
+
+            let msg = match update.get("message") {
+                Some(m) => m,
+                None => continue,
+            };
+
+            let chat_id = msg["chat"]["id"].as_i64().unwrap_or(0);
+            let sender_id = msg["from"]["id"].as_i64().unwrap_or(0);
+            let sender_name = msg["from"]["first_name"].as_str().unwrap_or("Unknown");
+            let text = match msg["text"].as_str() {
+                Some(t) => t.to_string(),
+                None => continue, // Skip non-text for now
+            };
+
+            info!("📩 Telegram [{} / {}]: {}", sender_name, chat_id, text);
+
+            // Handle /start command
+            if text == "/start" {
+                let _ = client.post(&format!("{}/sendMessage", api_base))
+                    .json(&serde_json::json!({
+                        "chat_id": chat_id,
+                        "text": "👋 Hello! I'm Klaw, your AI assistant. Send me a message to get started!",
+                        "parse_mode": "Markdown"
+                    }))
+                    .send().await;
+                continue;
+            }
+
+            // Handle /new and /reset
+            if text == "/new" || text == "/reset" {
+                // TODO: Reset session
+                let _ = client.post(&format!("{}/sendMessage", api_base))
+                    .json(&serde_json::json!({
+                        "chat_id": chat_id,
+                        "text": "🔄 Conversation reset!",
+                    }))
+                    .send().await;
+                continue;
+            }
+
+            // Handle /status
+            if text == "/status" {
+                let s = state.read().await;
+                let uptime = s.started_at.elapsed().as_secs();
+                let model = s.config.agents.defaults.model.as_deref().unwrap_or("unknown");
+                let _ = client.post(&format!("{}/sendMessage", api_base))
+                    .json(&serde_json::json!({
+                        "chat_id": chat_id,
+                        "text": format!("🦀 *Klaw Gateway*\n• Version: {}\n• Uptime: {}s\n• Model: `{}`\n• Provider: {}", 
+                            env!("CARGO_PKG_VERSION"), uptime, model, s.provider.name()),
+                        "parse_mode": "Markdown"
+                    }))
+                    .send().await;
+                continue;
+            }
+
+            // Handle /help
+            if text == "/help" {
+                let _ = client.post(&format!("{}/sendMessage", api_base))
+                    .json(&serde_json::json!({
+                        "chat_id": chat_id,
+                        "text": "🦀 *Klaw Commands:*\n/start - Start chatting\n/new - Reset conversation\n/status - Show status\n/help - This message\n\nJust send any message to chat with me!",
+                        "parse_mode": "Markdown"
+                    }))
+                    .send().await;
+                continue;
+            }
+
+            // Send typing indicator
+            let _ = client.post(&format!("{}/sendChatAction", api_base))
+                .json(&serde_json::json!({
+                    "chat_id": chat_id,
+                    "action": "typing"
+                }))
+                .send().await;
+
+            // Run agent
+            let response_text = {
+                let state_guard = state.read().await;
+                let config = &state_guard.config;
+                let model = config.agents.defaults.model.clone()
+                    .unwrap_or_else(|| "anthropic/claude-sonnet-4-20250514".to_string());
+                let model_for_agent = if model.contains('/') {
+                    model.split('/').last().unwrap_or(&model).to_string()
+                } else {
+                    model.clone()
+                };
+
+                let workspace = config.workspace_dir().to_string_lossy().to_string();
+                let tools_reg = create_default_registry(None);
+                let tool_names: Vec<&str> = tools_reg.list();
+                let system_prompt = SystemPromptBuilder::new(&workspace, &model_for_agent)
+                    .with_tools(&tool_names)
+                    .with_channel("telegram")
+                    .build();
+
+                let agent_config = AgentConfig {
+                    model: model_for_agent,
+                    system_prompt,
+                    max_tool_rounds: 10,
+                    temperature: None,
+                    max_tokens: Some(4096),
+                    failover_models: config.agents.defaults.failover.clone(),
+                    api_keys: config.agents.defaults.api_keys.clone(),
+                    retry_count: config.agents.defaults.retry_count.unwrap_or(2),
+                    retry_delay: std::time::Duration::from_millis(
+                        config.agents.defaults.retry_delay_ms.unwrap_or(1000),
+                    ),
+                    ..AgentConfig::default()
+                };
+
+                let tool_ctx = ToolContext {
+                    workspace_dir: workspace,
+                    session_key: format!("agent:default:telegram:{}", sender_id),
+                    agent_id: "default".to_string(),
+                };
+
+                let key = SessionKey::group("default", "telegram", &sender_id.to_string());
+                let mut session = state_guard.session_store.get_or_create(&key, "default").await;
+
+                let result = run_agent(
+                    state_guard.provider.as_ref(),
+                    &tools_reg,
+                    &mut session,
+                    &text,
+                    &agent_config,
+                    &tool_ctx,
+                ).await;
+
+                state_guard.session_store.update(&session).await;
+
+                match result {
+                    Ok(r) => r.response,
+                    Err(e) => format!("❌ Error: {}", e),
+                }
+            };
+
+            // Send response (chunked for Telegram's 4096 limit)
+            let chunks = chunk_text_for_telegram(&response_text);
+            for chunk in &chunks {
+                let _ = client.post(&format!("{}/sendMessage", api_base))
+                    .json(&serde_json::json!({
+                        "chat_id": chat_id,
+                        "text": chunk,
+                        "parse_mode": "Markdown",
+                        "reply_to_message_id": msg["message_id"].as_i64().unwrap_or(0)
+                    }))
+                    .send().await;
+            }
+
+            info!("📤 Telegram response sent to {}", sender_name);
+        }
+    }
+}
+
+fn chunk_text_for_telegram(text: &str) -> Vec<String> {
+    const MAX_LEN: usize = 4096;
+    if text.len() <= MAX_LEN {
+        return vec![text.to_string()];
+    }
+    let mut chunks = Vec::new();
+    let mut remaining = text;
+    while !remaining.is_empty() {
+        if remaining.len() <= MAX_LEN {
+            chunks.push(remaining.to_string());
+            break;
+        }
+        let split_at = remaining[..MAX_LEN].rfind('\n').unwrap_or(MAX_LEN);
+        chunks.push(remaining[..split_at].to_string());
+        remaining = remaining[split_at..].trim_start();
+    }
+    chunks
 }

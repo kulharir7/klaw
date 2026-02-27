@@ -25,6 +25,10 @@ impl CronScheduler {
         Self::default()
     }
 
+    pub fn job_count(&self) -> usize {
+        self.jobs.len()
+    }
+
     pub fn load_jobs() -> anyhow::Result<Self> {
         let path = klaw_core::Config::home_dir().join("cron_jobs.json");
         if path.exists() {
