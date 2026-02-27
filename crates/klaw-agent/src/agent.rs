@@ -1,8 +1,10 @@
+use crate::failover::FailoverChain;
 use crate::provider::{ChatRequest, LlmProvider};
 use klaw_core::session::Session;
 use klaw_core::types::{Message, Role, StreamChunk, ToolCall, ToolResult};
 use klaw_tools::{Tool, ToolContext, registry::ToolRegistry};
 use std::sync::Arc;
+use std::time::Duration;
 use tracing::{info, warn, error};
 
 /// Maximum tool call rounds to prevent infinite loops
@@ -15,6 +17,10 @@ pub struct AgentConfig {
     pub max_tool_rounds: usize,
     pub temperature: Option<f32>,
     pub max_tokens: Option<u32>,
+    pub failover_models: Option<Vec<String>>,
+    pub api_keys: Option<Vec<String>>,
+    pub retry_count: u32,
+    pub retry_delay: Duration,
 }
 
 impl Default for AgentConfig {
@@ -25,6 +31,10 @@ impl Default for AgentConfig {
             max_tool_rounds: MAX_TOOL_ROUNDS,
             temperature: None,
             max_tokens: None,
+            failover_models: None,
+            api_keys: None,
+            retry_count: 2,
+            retry_delay: Duration::from_millis(1000),
         }
     }
 }
@@ -36,6 +46,7 @@ pub struct AgentResult {
     pub tool_calls_made: usize,
     pub input_tokens: u64,
     pub output_tokens: u64,
+    pub model_used: String,
 }
 
 /// Run the agent loop: message → LLM → tool calls → response
@@ -53,6 +64,16 @@ pub async fn run_agent(
     let mut total_input = 0u64;
     let mut total_output = 0u64;
     let mut total_tool_calls = 0usize;
+    let mut model_used = config.model.clone();
+
+    // Build failover chain
+    let failover_chain = FailoverChain::new(
+        &config.model,
+        config.failover_models.as_deref(),
+        config.api_keys.as_deref(),
+        config.retry_count,
+        config.retry_delay,
+    );
 
     // Build tool schemas
     let tool_schemas = if !tools.is_empty() {
@@ -66,18 +87,33 @@ pub async fn run_agent(
         let mut messages = vec![Message::system(&config.system_prompt)];
         messages.extend(session.messages.clone());
 
-        // Call LLM
-        let request = ChatRequest {
-            model: config.model.clone(),
-            messages,
-            tools: tool_schemas.clone(),
-            temperature: config.temperature,
-            max_tokens: config.max_tokens,
-            stream: false,
-        };
+        // Call LLM with failover
+        let messages_clone = messages.clone();
+        let tools_clone = tool_schemas.clone();
+        let temperature = config.temperature;
+        let max_tokens = config.max_tokens;
 
         info!("Agent round {} — calling LLM (model: {})", round + 1, config.model);
-        let response = provider.chat(request).await?;
+
+        let (response, used_model) = failover_chain
+            .execute(|model, _key| {
+                let model = model.to_string();
+                let msgs = messages_clone.clone();
+                let ts = tools_clone.clone();
+                async move {
+                    let request = ChatRequest {
+                        model,
+                        messages: msgs,
+                        tools: ts,
+                        temperature,
+                        max_tokens,
+                        stream: false,
+                    };
+                    provider.chat(request).await
+                }
+            })
+            .await?;
+        model_used = used_model;
 
         total_input += response.usage.input_tokens;
         total_output += response.usage.output_tokens;
@@ -93,6 +129,7 @@ pub async fn run_agent(
                 tool_calls_made: total_tool_calls,
                 input_tokens: total_input,
                 output_tokens: total_output,
+                model_used: model_used.clone(),
             });
         }
 
@@ -156,5 +193,6 @@ pub async fn run_agent(
         tool_calls_made: total_tool_calls,
         input_tokens: total_input,
         output_tokens: total_output,
+        model_used,
     })
 }

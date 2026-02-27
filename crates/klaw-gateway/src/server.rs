@@ -513,6 +513,12 @@ async fn handle_ws_connection(mut socket: WebSocket, state: Arc<RwLock<GatewaySt
                             max_tool_rounds: 10,
                             temperature: None,
                             max_tokens: Some(4096),
+                            failover_models: config.agents.defaults.failover.clone(),
+                            api_keys: config.agents.defaults.api_keys.clone(),
+                            retry_count: config.agents.defaults.retry_count.unwrap_or(2),
+                            retry_delay: std::time::Duration::from_millis(
+                                config.agents.defaults.retry_delay_ms.unwrap_or(1000),
+                            ),
                         };
 
                         let tool_ctx = ToolContext {

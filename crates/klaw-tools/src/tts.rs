@@ -18,11 +18,27 @@ impl Tool for TtsTool {
             "required": ["text"]
         })
     }
-    async fn execute(&self, _params: Value, _ctx: &ToolContext) -> anyhow::Result<ToolResult> {
+    async fn execute(&self, params: Value, _ctx: &ToolContext) -> anyhow::Result<ToolResult> {
+        let text = match params["text"].as_str() {
+            Some(t) => t,
+            None => return Ok(ToolResult {
+                tool_call_id: String::new(),
+                content: "Missing 'text' parameter.".into(),
+                is_error: true,
+            }),
+        };
+
+        let result = serde_json::json!({
+            "text": text,
+            "status": "tts_not_configured",
+            "supported_providers": ["elevenlabs", "openai", "edge-tts"],
+            "note": "Configure a TTS provider in ~/.klaw/klaw.json to enable speech synthesis."
+        });
+
         Ok(ToolResult {
             tool_call_id: String::new(),
-            content: "TTS not yet configured.".into(),
-            is_error: true,
+            content: serde_json::to_string_pretty(&result).unwrap(),
+            is_error: false,
         })
     }
 }

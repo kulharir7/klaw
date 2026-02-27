@@ -133,6 +133,10 @@ pub struct AgentDefaults {
     pub workspace: Option<String>,
     pub bootstrap_max_chars: usize,
     pub bootstrap_total_max_chars: usize,
+    pub failover: Option<Vec<String>>,
+    pub api_keys: Option<Vec<String>>,
+    pub retry_count: Option<u32>,
+    pub retry_delay_ms: Option<u64>,
 }
 
 impl Default for AgentDefaults {
@@ -145,6 +149,10 @@ impl Default for AgentDefaults {
             workspace: None,
             bootstrap_max_chars: 20000,
             bootstrap_total_max_chars: 150000,
+            failover: None,
+            api_keys: None,
+            retry_count: None,
+            retry_delay_ms: None,
         }
     }
 }
