@@ -1,3 +1,4 @@
+pub mod access_control;
 pub mod channels;
 
 use async_trait::async_trait;

@@ -1,11 +1,20 @@
 pub mod agent;
+pub mod compaction;
+pub mod context_pruning;
 pub mod failover;
+pub mod loop_detection;
 pub mod prompt;
 pub mod provider;
 pub mod providers;
+pub mod slash_commands;
+pub mod thinking;
 
-pub use agent::{run_agent, AgentConfig, AgentResult};
+pub use agent::{run_agent, run_agent_streaming, AgentConfig, AgentResult};
+pub use compaction::{CompactionConfig, CompactionResult, compact_session};
+pub use context_pruning::{PruningConfig, prune_context};
 pub use failover::FailoverChain;
+pub use loop_detection::{LoopDetector, LoopStatus};
 pub use prompt::SystemPromptBuilder;
 pub use provider::LlmProvider;
 pub use providers::{AnthropicProvider, OpenAiProvider, create_provider, list_providers};
+pub use thinking::{ThinkingConfig, ThinkingLevel};

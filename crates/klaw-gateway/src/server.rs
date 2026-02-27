@@ -1,8 +1,10 @@
 use axum::{
     Router,
+    body::Bytes,
     extract::ws::{Message, WebSocket, WebSocketUpgrade},
+    http::HeaderMap,
     response::{Html, IntoResponse, Json},
-    routing::get,
+    routing::{get, post},
 };
 use klaw_core::config::Config;
 use klaw_core::session::SessionStore;
@@ -180,6 +182,10 @@ pub async fn start_gateway(config: Config) -> anyhow::Result<()> {
         }))
         .route("/__klaw__/canvas/{path:.*}", get(canvas_handler))
         .route("/__klaw__/a2ui/{path:.*}", get(a2ui_handler))
+        .route("/webhook", post({
+            let state = state.clone();
+            move |headers: HeaderMap, body: Bytes| webhook_handler(headers, body, state)
+        }))
         .route("/ws", get({
             let state = state.clone();
             move |ws: WebSocketUpgrade| async move {
@@ -200,6 +206,7 @@ pub async fn start_gateway(config: Config) -> anyhow::Result<()> {
     info!("   WebChat:  http://{}", addr);
     info!("   Canvas:   http://{}/__klaw__/canvas/", addr);
     info!("   A2UI:     http://{}/__klaw__/a2ui/", addr);
+    info!("   Webhook:  http://{}/webhook", addr);
     info!("   Health:   http://{}/health", addr);
 
     let result = axum::serve(listener, app)
@@ -264,6 +271,42 @@ async fn a2ui_handler() -> Html<&'static str> {
     <body style="margin:0;background:#1a1a2e;color:#e0e0f0;font-family:system-ui;display:flex;align-items:center;justify-content:center;height:100vh;">
     <div id="a2ui-root"><h2>🖼️ Klaw A2UI</h2><p>A2UI content will be rendered here.</p></div>
     </body></html>"#)
+}
+
+async fn webhook_handler(
+    headers: HeaderMap,
+    body: Bytes,
+    state: Arc<RwLock<GatewayState>>,
+) -> Json<serde_json::Value> {
+    let s = state.read().await;
+    let secret = s.config.gateway.token.clone();
+    drop(s);
+
+    let handler = crate::webhooks::WebhookHandler::new("/webhook", secret);
+
+    // Validate signature if present
+    let signature = headers.get("x-signature-256")
+        .or_else(|| headers.get("x-hub-signature-256"))
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+
+    if !handler.validate(&body, signature) {
+        return Json(serde_json::json!({ "ok": false, "error": "Invalid signature" }));
+    }
+
+    // Parse body
+    let body_value: serde_json::Value = match serde_json::from_slice(&body) {
+        Ok(v) => v,
+        Err(e) => return Json(serde_json::json!({ "ok": false, "error": format!("Invalid JSON: {}", e) })),
+    };
+
+    match handler.process(body_value) {
+        Some(msg) => {
+            info!("Webhook received message from {}: {:?}", msg.sender_id, msg.text);
+            Json(serde_json::json!({ "ok": true, "message_id": msg.id }))
+        }
+        None => Json(serde_json::json!({ "ok": false, "error": "Could not extract message from payload" })),
+    }
 }
 
 async fn handle_ws_connection(mut socket: WebSocket, state: Arc<RwLock<GatewayState>>) {
@@ -519,6 +562,7 @@ async fn handle_ws_connection(mut socket: WebSocket, state: Arc<RwLock<GatewaySt
                             retry_delay: std::time::Duration::from_millis(
                                 config.agents.defaults.retry_delay_ms.unwrap_or(1000),
                             ),
+                            ..AgentConfig::default()
                         };
 
                         let tool_ctx = ToolContext {

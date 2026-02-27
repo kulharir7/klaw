@@ -1,3 +1,4 @@
+use crate::thinking::ThinkingConfig;
 use async_trait::async_trait;
 use klaw_core::types::{Message, StreamChunk, ToolCall, Usage};
 use std::pin::Pin;
@@ -12,6 +13,7 @@ pub struct ChatRequest {
     pub temperature: Option<f32>,
     pub max_tokens: Option<u32>,
     pub stream: bool,
+    pub thinking: Option<ThinkingConfig>,
 }
 
 /// Non-streaming response from LLM
