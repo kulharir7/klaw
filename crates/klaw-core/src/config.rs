@@ -323,6 +323,56 @@ impl Config {
             .join(agent_id)
             .join("sessions")
     }
+    
+    /// Get the model for a specific channel and chat
+    /// Falls back to default model if no channel-specific model is set
+    pub fn get_model_for_channel(&self, channel: &str, chat_id: &str) -> String {
+        // Check channel-specific model first
+        if let Some(ref model_by_channel) = self.channels.model_by_channel {
+            if let Some(channel_models) = model_by_channel.get(channel) {
+                if let Some(model) = channel_models.get(chat_id) {
+                    return model.clone();
+                }
+                // Check for wildcard "*" model for this channel
+                if let Some(model) = channel_models.get("*") {
+                    return model.clone();
+                }
+            }
+        }
+        
+        // Fall back to default model
+        self.agents.defaults.model.clone()
+            .unwrap_or_else(|| "anthropic/claude-sonnet-4-20250514".to_string())
+    }
+    
+    /// Check if a channel-specific model is configured
+    pub fn has_channel_model(&self, channel: &str, chat_id: &str) -> bool {
+        if let Some(ref model_by_channel) = self.channels.model_by_channel {
+            if let Some(channel_models) = model_by_channel.get(channel) {
+                return channel_models.contains_key(chat_id) || channel_models.contains_key("*");
+            }
+        }
+        false
+    }
+    
+    /// Set a model for a specific channel and chat
+    pub fn set_model_for_channel(&mut self, channel: &str, chat_id: &str, model: &str) {
+        self.channels.model_by_channel
+            .get_or_insert_with(HashMap::new)
+            .entry(channel.to_string())
+            .or_insert_with(HashMap::new)
+            .insert(chat_id.to_string(), model.to_string());
+    }
+    
+    /// Remove a channel-specific model
+    pub fn clear_model_for_channel(&mut self, channel: &str, chat_id: &str) -> bool {
+        if let Some(ref mut model_by_channel) = self.channels.model_by_channel {
+            if let Some(channel_models) = model_by_channel.get_mut(channel) {
+                return channel_models.remove(chat_id).is_some();
+            }
+        }
+        false
+    }
 }
 
 // ─── Gateway ──────────────────────────────────────────────────────────────────

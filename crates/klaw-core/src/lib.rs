@@ -5,6 +5,7 @@ pub mod error;
 pub mod identity;
 pub mod secrets;
 pub mod session;
+pub mod thread_bindings;
 pub mod types;
 pub mod usage;
 
@@ -14,3 +15,4 @@ pub use config::Config;
 pub use error::KlawError;
 pub use identity::{Identity, IdentityLink, IdentityStore};
 pub use session::{Session, SessionStore};
+pub use thread_bindings::{ThreadBinding, ThreadBindingStore};
