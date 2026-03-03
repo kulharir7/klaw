@@ -17,3 +17,6 @@ tracing = { workspace = true }
 anyhow = { workspace = true }
 reqwest = { workspace = true }
 chrono = { workspace = true }
+tokio-tungstenite = { version = "0.26", features = ["native-tls"] }
+futures = "0.3"
+urlencoding = "2.1"

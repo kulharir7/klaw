@@ -1,4 +1,4 @@
-//! Discord channel — Bot API via reqwest (serenity-equivalent)
+//! Discord channel — Bot API via reqwest + Gateway WebSocket
 //!
 //! Supports: text, media, embeds, reactions, threads, slash commands,
 //! inline buttons, voice status, role management, moderation.
@@ -7,17 +7,69 @@ use crate::Channel;
 use async_trait::async_trait;
 use klaw_core::types::{ChatType, InboundMessage, Media};
 use tokio::sync::mpsc;
-use tracing::{info, warn};
+use tracing::{info, warn, error};
+use futures::{StreamExt, SinkExt};
+use serde::{Deserialize, Serialize};
 
 const DISCORD_API: &str = "https://discord.com/api/v10";
 const DISCORD_GATEWAY: &str = "wss://gateway.discord.gg/?v=10&encoding=json";
 const MAX_MESSAGE_LENGTH: usize = 2000;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct GatewayPayload {
+    op: u32,
+    d: Option<serde_json::Value>,
+    s: Option<u64>,
+    t: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct HelloPayload {
+    heartbeat_interval: u64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct ReadyPayload {
+    #[serde(rename = "session_id")]
+    session_id: String,
+    user: DiscordUser,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct DiscordUser {
+    id: String,
+    username: String,
+    discriminator: Option<String>,
+    bot: Option<bool>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct MessageCreate {
+    id: String,
+    channel_id: String,
+    author: DiscordUser,
+    content: Option<String>,
+    guild_id: Option<String>,
+    mentions: Option<Vec<DiscordUser>>,
+    #[serde(rename = "member")]
+    member: Option<GuildMember>,
+    #[serde(rename = "referenced_message")]
+    referenced_message: Option<Box<MessageCreate>>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct GuildMember {
+    roles: Option<Vec<String>>,
+    nick: Option<String>,
+}
 
 pub struct DiscordChannel {
     bot_token: String,
     client: reqwest::Client,
     tx: Option<mpsc::Sender<InboundMessage>>,
     shutdown: Option<tokio::sync::watch::Sender<bool>>,
+    session_id: Option<String>,
+    bot_user_id: Option<String>,
 }
 
 impl DiscordChannel {
@@ -27,6 +79,8 @@ impl DiscordChannel {
             client: reqwest::Client::new(),
             tx: None,
             shutdown: None,
+            session_id: None,
+            bot_user_id: None,
         }
     }
 
@@ -65,6 +119,154 @@ impl DiscordChannel {
         }
         chunks
     }
+
+    async fn run_gateway(&mut self, tx: mpsc::Sender<InboundMessage>) -> anyhow::Result<()> {
+        use tokio_tungstenite::{connect_async, tungstenite::Message as WsMessage};
+
+        let (ws_stream, _) = connect_async(DISCORD_GATEWAY).await?;
+        let (mut write, mut read) = ws_stream.split();
+
+        let mut heartbeatInterval = 45000u64;
+        let mut sequence: Option<u64> = None;
+
+        // Receive Hello
+        if let Some(msg) = read.next().await {
+            if let Ok(WsMessage::Text(text)) = msg {
+                if let Ok(payload) = serde_json::from_str::<GatewayPayload>(&text) {
+                    if payload.op == 10 {
+                        if let Some(d) = payload.d {
+                            if let Ok(hello) = serde_json::from_value::<HelloPayload>(d) {
+                                heartbeatInterval = hello.heartbeat_interval;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Identify
+        let identify = GatewayPayload {
+            op: 2,
+            d: Some(serde_json::json!({
+                "token": self.bot_token,
+                "intents": 513, // GUILDS + GUILD_MESSAGES + DM_MESSAGES + MESSAGE_CONTENT
+                "properties": {
+                    "os": std::env::consts::OS,
+                    "browser": "klaw",
+                    "device": "klaw"
+                }
+            })),
+            s: None,
+            t: None,
+        };
+        write.send(WsMessage::Text(serde_json::to_string(&identify)?.into())).await?;
+
+        // Event loop
+        let mut last_heartbeat = std::time::Instant::now();
+        let heartbeat_duration = std::time::Duration::from_millis(heartbeatInterval);
+
+        loop {
+            tokio::select! {
+                // Heartbeat
+                _ = tokio::time::sleep(heartbeat_duration / 2) => {
+                    if last_heartbeat.elapsed() >= heartbeat_duration {
+                        let heartbeat = GatewayPayload {
+                            op: 1,
+                            d: sequence.map(|s| serde_json::json!(s)),
+                            s: None,
+                            t: None,
+                        };
+                        if write.send(WsMessage::Text(serde_json::to_string(&heartbeat)?.into())).await.is_err() {
+                            break;
+                        }
+                        last_heartbeat = std::time::Instant::now();
+                    }
+                }
+
+                // Incoming messages
+                msg = read.next() => {
+                    match msg {
+                        Some(Ok(WsMessage::Text(text))) => {
+                            if let Ok(payload) = serde_json::from_str::<GatewayPayload>(&text) {
+                                if let Some(s) = payload.s { sequence = Some(s); }
+
+                                match payload.t.as_deref() {
+                                    Some("READY") => {
+                                        if let Some(d) = payload.d {
+                                            if let Ok(ready) = serde_json::from_value::<ReadyPayload>(d) {
+                                                self.session_id = Some(ready.session_id);
+                                                self.bot_user_id = Some(ready.user.id);
+                                                info!("Discord ready: @{}", ready.user.username);
+                                            }
+                                        }
+                                    }
+                                    Some("MESSAGE_CREATE") => {
+                                        if let Some(d) = payload.d {
+                                            if let Ok(msg) = serde_json::from_value::<MessageCreate>(d) {
+                                                self.handle_message(&msg, &tx).await;
+                                            }
+                                        }
+                                    }
+                                    Some("MESSAGE_UPDATE") => {
+                                        // Handle message edits if needed
+                                    }
+                                    Some("MESSAGE_DELETE") => {
+                                        // Handle message deletion if needed
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                        Some(Ok(WsMessage::Ping(data))) => {
+                            let _ = write.send(WsMessage::Pong(data)).await;
+                        }
+                        Some(Ok(WsMessage::Close(_))) => {
+                            warn!("Discord Gateway connection closed");
+                            break;
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn handle_message(&self, msg: &MessageCreate, tx: &mpsc::Sender<InboundMessage>) {
+        // Ignore own messages
+        if Some(&msg.author.id) == self.bot_user_id.as_ref() {
+            return;
+        }
+
+        let content = msg.content.clone().unwrap_or_default();
+        if content.is_empty() {
+            return;
+        }
+
+        let chat_type = if msg.guild_id.is_some() {
+            ChatType::Group
+        } else {
+            ChatType::Direct
+        };
+
+        let inbound = InboundMessage {
+            id: msg.id.clone(),
+            channel: "discord".to_string(),
+            chat_id: msg.channel_id.clone(),
+            chat_type,
+            sender_id: msg.author.id.clone(),
+            sender_name: Some(msg.author.username.clone()),
+            text: Some(content),
+            media: None,
+            reply_to: msg.referenced_message.as_ref().map(|r| r.id.clone()),
+            timestamp: chrono::Utc::now(),
+        };
+
+        if let Err(e) = tx.send(inbound).await {
+            error!("Failed to send Discord message to channel: {}", e);
+        }
+    }
 }
 
 #[async_trait]
@@ -73,18 +275,22 @@ impl Channel for DiscordChannel {
 
     async fn start(&mut self, tx: mpsc::Sender<InboundMessage>) -> anyhow::Result<()> {
         self.tx = Some(tx.clone());
-        let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
-        self.shutdown = Some(shutdown_tx);
 
-        let bot_info = self.api_call(reqwest::Method::GET, "/users/@me", None).await?;
-        let bot_name = bot_info["username"].as_str().unwrap_or("bot");
-        info!("Discord bot started: {}", bot_name);
+        // Get bot info first
+        match self.api_call(reqwest::Method::GET, "/users/@me", None).await {
+            Ok(bot_info) => {
+                let bot_name = bot_info["username"].as_str().unwrap_or("bot");
+                let bot_id = bot_info["id"].as_str().unwrap_or("");
+                self.bot_user_id = Some(bot_id.to_string());
+                info!("Discord bot connecting: @{}", bot_name);
+            }
+            Err(e) => {
+                warn!("Failed to get bot info: {}", e);
+            }
+        }
 
-        // TODO: Full Gateway WebSocket connection for real-time events
-        // For now, this is a placeholder — production needs Discord Gateway WS
-        info!("Discord: Gateway WebSocket connection needed for real-time events (TODO)");
-
-        Ok(())
+        // Start Gateway connection
+        self.run_gateway(tx).await
     }
 
     async fn send_text(&self, chat_id: &str, text: &str, reply_to: Option<&str>) -> anyhow::Result<()> {
@@ -108,7 +314,6 @@ impl Channel for DiscordChannel {
     }
 
     async fn send_media(&self, chat_id: &str, media: &Media) -> anyhow::Result<()> {
-        // Discord uses multipart for file uploads, or embed URLs
         if let Some(ref url) = media.url {
             let body = serde_json::json!({
                 "embeds": [{
@@ -161,8 +366,5 @@ pub async fn create_thread(client: &reqwest::Client, token: &str, channel_id: &s
 }
 
 fn urlencoding(s: &str) -> String {
-    s.chars().map(|c| match c {
-        'A'..='Z' | 'a'..='z' | '0'..='9' | '-' | '_' | '.' | '~' => c.to_string(),
-        _ => format!("%{:02X}", c as u8),
-    }).collect()
+    urlencoding::encode(s).to_string()
 }

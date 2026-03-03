@@ -3,7 +3,7 @@ use axum::{
     body::Bytes,
     extract::ws::{Message, WebSocket, WebSocketUpgrade},
     http::HeaderMap,
-    response::{Html, IntoResponse, Json},
+    response::{Html, Json},
     routing::{get, post},
 };
 use klaw_core::config::Config;
@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::RwLock;
-use tracing::{info, warn, error};
+use tracing::{info, warn};
 
 /// Device identity for connected clients/nodes
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -534,6 +534,26 @@ async fn handle_ws_connection(mut socket: WebSocket, state: Arc<RwLock<GatewaySt
                             continue;
                         }
 
+                        // Slash command handling
+                        let session_key = SessionKey::main("default");
+                        match handle_slash_command(user_msg, &state, &session_key).await {
+                            SlashCommand::Handled(response) => {
+                                let _ = socket.send(Message::Text(serde_json::json!({
+                                    "type": "res", "id": id, "ok": true,
+                                    "payload": {
+                                        "runId": uuid::Uuid::new_v4().to_string(),
+                                        "status": "ok",
+                                        "response": response,
+                                        "isCommand": true
+                                    }
+                                }).to_string().into())).await;
+                                continue;
+                            }
+                            SlashCommand::NotASlashCommand | SlashCommand::ContinueToAgent => {
+                                // Continue to regular agent processing
+                            }
+                        }
+
                         // Idempotency check
                         let idemp_key = frame["params"]["idempotencyKey"].as_str().map(|s| s.to_string());
                         if let Some(ref key) = idemp_key {
@@ -605,6 +625,8 @@ async fn handle_ws_connection(mut socket: WebSocket, state: Arc<RwLock<GatewaySt
                         let key = SessionKey::main("default");
                         let mut session = state_guard.session_store.get_or_create(&key, "default").await;
 
+                        // TODO: Proper streaming integration (needs channel forwarding during agent run)
+                        // For now, streaming mode just includes the response in one shot
                         let result = run_agent(
                             state_guard.provider.as_ref(),
                             &tools_reg,
@@ -990,4 +1012,135 @@ fn chunk_text_for_telegram(text: &str) -> Vec<String> {
         remaining = remaining[split_at..].trim_start();
     }
     chunks
+}
+
+/// Slash command handler — returns Some(response) if command was handled
+enum SlashCommand {
+    Handled(String),
+    NotASlashCommand,
+    ContinueToAgent,  // Slash command but should still go to agent
+}
+
+async fn handle_slash_command(
+    text: &str,
+    state: &Arc<RwLock<GatewayState>>,
+    session_key: &SessionKey,
+) -> SlashCommand {
+    let text = text.trim();
+    if !text.starts_with('/') {
+        return SlashCommand::NotASlashCommand;
+    }
+
+    let parts: Vec<&str> = text.splitn(2, ' ').collect();
+    let command = parts[0].to_lowercase();
+    let args = parts.get(1).unwrap_or(&"");
+
+    match command.as_str() {
+        "/help" | "/commands" => {
+            SlashCommand::Handled(
+                "🦀 *Klaw Commands:*\n\
+                /help — Show this help\n\
+                /status — Show gateway status\n\
+                /model — Show current model\n\
+                /model <name> — Switch model\n\
+                /new — Start new conversation\n\
+                /reset — Reset current session\n\
+                /clear — Clear screen (WebChat)\n\
+                /usage — Show token usage\n\
+                /agents — List agents\n\
+                /version — Show version\n".to_string()
+            )
+        }
+
+        "/status" => {
+            let s = state.read().await;
+            let uptime = s.started_at.elapsed().as_secs();
+            SlashCommand::Handled(format!(
+                "🦀 *Klaw Gateway Status*\n\
+                • Version: {}\n\
+                • Uptime: {}s\n\
+                • Provider: {}\n\
+                • Model: `{}`\n\
+                • Clients: {}\n\
+                • Paired devices: {}",
+                env!("CARGO_PKG_VERSION"),
+                uptime,
+                s.provider.name(),
+                s.config.agents.defaults.model.as_deref().unwrap_or("unknown"),
+                s.presence.len(),
+                s.pairing_store.devices.len()
+            ))
+        }
+
+        "/model" => {
+            if args.is_empty() {
+                let s = state.read().await;
+                let current = s.config.agents.defaults.model.as_deref().unwrap_or("unknown");
+                let provider = s.provider.name();
+                SlashCommand::Handled(format!(
+                    "📊 *Current Model:*\n\
+                    • Model: `{}`\n\
+                    • Provider: {}\n\n\
+                    To change: `/model <provider/model>`\n\
+                    Example: `/model anthropic/claude-sonnet-4-20250514`",
+                    current, provider
+                ))
+            } else {
+                // Update model in config
+                let mut s = state.write().await;
+                let new_model = args.trim().to_string();
+                s.config.agents.defaults.model = Some(new_model.clone());
+                SlashCommand::Handled(format!("✅ Model switched to: `{}`", new_model))
+            }
+        }
+
+        "/new" | "/reset" => {
+            let s = state.write().await;
+            let deleted = s.session_store.delete(&session_key.0).await;
+            if deleted {
+                SlashCommand::Handled("🔄 Session reset! Starting fresh conversation.".to_string())
+            } else {
+                SlashCommand::Handled("✅ New session started!".to_string())
+            }
+        }
+
+        "/usage" => {
+            let s = state.read().await;
+            if let Some(session) = s.session_store.get(&session_key.0).await {
+                SlashCommand::Handled(format!(
+                    "📊 *Session Usage:*\n\
+                    • Input tokens: {}\n\
+                    • Output tokens: {}\n\
+                    • Total tokens: {}\n\
+                    • Messages: {}",
+                    session.meta.input_tokens,
+                    session.meta.output_tokens,
+                    session.meta.total_tokens,
+                    session.meta.message_count
+                ))
+            } else {
+                SlashCommand::Handled("📊 No session usage data yet.".to_string())
+            }
+        }
+
+        "/version" => {
+            SlashCommand::Handled(format!(
+                "🦀 Klaw v{}\n\
+                • Rust Multi-Agent Platform\n\
+                • Gateway + CLI + Channels",
+                env!("CARGO_PKG_VERSION")
+            ))
+        }
+
+        "/agents" => {
+            SlashCommand::Handled(
+                "📋 *Agents:*\n\
+                • `default` — Main agent (active)\n\n\
+                Multi-agent support coming soon!".to_string()
+            )
+        }
+
+        // Unknown slash command — could be a custom command or just let agent handle
+        _ => SlashCommand::ContinueToAgent
+    }
 }

@@ -16,6 +16,7 @@ use tracing::{info, warn, error};
 const MAX_TOOL_ROUNDS: usize = 10;
 
 /// Agent configuration
+#[derive(Clone)]
 pub struct AgentConfig {
     pub model: String,
     pub system_prompt: String,
