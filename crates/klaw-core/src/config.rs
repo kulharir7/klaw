@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use crate::streaming::StreamingConfig;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use tracing::info;
@@ -468,6 +469,7 @@ pub struct AgentDefaults {
     pub skip_bootstrap: Option<bool>,
     pub repo_root: Option<String>,
     pub block_streaming_default: Option<String>,
+    pub streaming: Option<StreamingConfig>,
     pub typing_mode: Option<String>,
     pub typing_interval_seconds: Option<u32>,
     pub human_delay: Option<HumanDelayConfig>,
@@ -505,6 +507,7 @@ impl Default for AgentDefaults {
             typing_interval_seconds: None,
             human_delay: None,
             heartbeat_every: None,
+            streaming: None,
         }
     }
 }
