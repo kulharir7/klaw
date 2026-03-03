@@ -16,6 +16,7 @@ pub struct SessionMeta {
     pub agent_id: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    pub last_accessed_at: DateTime<Utc>,
     pub display_name: Option<String>,
     pub channel: Option<String>,
     pub chat_type: Option<String>,
@@ -36,13 +37,15 @@ pub struct Session {
 impl Session {
     pub fn new(key: &SessionKey, agent_id: &str) -> Self {
         let session_id = uuid::Uuid::new_v4().to_string();
+        let now = Utc::now();
         Self {
             meta: SessionMeta {
                 session_id,
                 session_key: key.0.clone(),
                 agent_id: agent_id.to_string(),
-                created_at: Utc::now(),
-                updated_at: Utc::now(),
+                created_at: now,
+                updated_at: now,
+                last_accessed_at: now,
                 display_name: None,
                 channel: None,
                 chat_type: None,
@@ -82,6 +85,51 @@ impl Session {
             let drain_count = self.messages.len() - keep;
             self.messages.drain(..drain_count);
         }
+    }
+
+    /// Touch the session (update last_accessed_at)
+    pub fn touch(&mut self) {
+        self.meta.last_accessed_at = Utc::now();
+    }
+
+    /// Check if session is idle (no access for `idle_secs` seconds)
+    pub fn is_idle(&self, idle_secs: u64) -> bool {
+        let now = Utc::now();
+        let elapsed = now.signed_duration_since(self.meta.last_accessed_at);
+        elapsed.num_seconds() as u64 > idle_secs
+    }
+
+    /// Check if session is expired (created more than `max_age_secs` seconds ago)
+    pub fn is_expired(&self, max_age_secs: u64) -> bool {
+        let now = Utc::now();
+        let age = now.signed_duration_since(self.meta.created_at);
+        age.num_seconds() as u64 > max_age_secs
+    }
+
+    /// Check if session should be reset based on token count
+    pub fn needs_token_reset(&self, max_tokens: u64) -> bool {
+        self.meta.total_tokens > max_tokens
+    }
+
+    /// Reset the session (clear messages and reset metadata)
+    pub fn reset(&mut self) {
+        let old_created = self.meta.created_at;
+        self.messages.clear();
+        self.meta = SessionMeta {
+            session_id: uuid::Uuid::new_v4().to_string(),
+            session_key: self.meta.session_key.clone(),
+            agent_id: self.meta.agent_id.clone(),
+            created_at: old_created,
+            updated_at: Utc::now(),
+            last_accessed_at: Utc::now(),
+            display_name: None,
+            channel: self.meta.channel.clone(),
+            chat_type: self.meta.chat_type.clone(),
+            input_tokens: 0,
+            output_tokens: 0,
+            total_tokens: 0,
+            message_count: 0,
+        };
     }
 }
 
@@ -230,6 +278,80 @@ impl SessionStore {
         file.write_all(line.as_bytes())?;
         Ok(())
     }
+
+    /// Clean up idle sessions (not accessed for `idle_secs` seconds)
+    pub async fn cleanup_idle(&self, idle_secs: u64) -> Vec<String> {
+        let mut sessions = self.sessions.write().await;
+        let mut removed = Vec::new();
+        
+        sessions.retain(|key, session| {
+            if session.is_idle(idle_secs) {
+                removed.push(key.clone());
+                info!("Cleaning up idle session: {}", key);
+                false
+            } else {
+                true
+            }
+        });
+
+        removed
+    }
+
+    /// Clean up expired sessions (older than `max_age_secs` seconds)
+    pub async fn cleanup_expired(&self, max_age_secs: u64) -> Vec<String> {
+        let mut sessions = self.sessions.write().await;
+        let mut removed = Vec::new();
+        
+        sessions.retain(|key, session| {
+            if session.is_expired(max_age_secs) {
+                removed.push(key.clone());
+                info!("Cleaning up expired session: {}", key);
+                false
+            } else {
+                true
+            }
+        });
+
+        removed
+    }
+
+    /// Reset sessions that exceed token limit
+    pub async fn reset_over_token_limit(&self, max_tokens: u64) -> Vec<String> {
+        let mut sessions = self.sessions.write().await;
+        let mut reset_keys = Vec::new();
+        
+        for (key, session) in sessions.iter_mut() {
+            if session.needs_token_reset(max_tokens) {
+                session.reset();
+                reset_keys.push(key.clone());
+                info!("Reset session due to token limit: {}", key);
+            }
+        }
+
+        reset_keys
+    }
+
+    /// Get session statistics
+    pub async fn stats(&self) -> SessionStats {
+        let sessions = self.sessions.read().await;
+        let total = sessions.len();
+        let total_messages: u64 = sessions.values().map(|s| s.meta.message_count).sum();
+        let total_tokens: u64 = sessions.values().map(|s| s.meta.total_tokens).sum();
+        
+        SessionStats {
+            total_sessions: total,
+            total_messages,
+            total_tokens,
+        }
+    }
+}
+
+/// Session statistics
+#[derive(Debug, Clone)]
+pub struct SessionStats {
+    pub total_sessions: usize,
+    pub total_messages: u64,
+    pub total_tokens: u64,
 }
 
 /// Load messages from a JSONL transcript file
