@@ -33,7 +33,7 @@
 | Tailscale integration | ❌ | Remote access via Tailscale |
 | Gateway-owned pairing | ❌ | Challenge-nonce signing |
 | Trusted proxy auth | ❌ | Proxy authentication |
-| Secrets management | ❌ | Encrypted secrets store |
+| Secrets management | ✅ | Encrypted secrets store with master key |
 | Sandbox (Docker) | ❌ | Container isolation for agents |
 
 ## 2. CONFIG SYSTEM (`klaw-core`)
@@ -51,13 +51,13 @@
 | model as object {primary, fallbacks} | ❌ | OpenClaw supports string OR object form |
 | imageModel config | ❌ | Primary + fallbacks for vision |
 | Per-agent list | 🔸 | AgentEntry has id/model/workspace, missing: identity, sandbox, tools, heartbeat, params, groupChat, subagents |
-| Bindings (multi-agent routing) | ❌ | Route channels→agents via match rules |
+| Bindings (multi-agent routing) | ✅ | BindingResolver routes channels→agents |
 | Channel model overrides (modelByChannel) | ❌ | Per-channel model pinning |
 | Channel defaults | ❌ | groupPolicy, heartbeat settings |
 | Per-channel full config | 🔸 | Basic fields only, missing: streaming, actions, groups, custom commands, retry, historyLimit, etc. |
 | Session reset (daily/idle) | ✅ | is_idle(), is_expired(), cleanup methods |
 | Session maintenance | 🔸 | prune, rotate - partial |
-| Session identity links | ❌ | Cross-channel identity mapping |
+| Session identity links | ✅ | IdentityStore for cross-channel identity |
 | Session thread bindings | ❌ | Thread-bound sessions |
 | Session send policy | ❌ | deny/allow rules |
 | Compaction | ✅ | Chunked summarization implemented |
@@ -71,7 +71,7 @@
 | CLI backends | ❌ | Fallback text-only CLI tools |
 | Multi-account channels | ❌ | Multiple accounts per channel |
 | Webhook config | ❌ | Inbound webhooks |
-| Auth profiles | ❌ | Per-agent auth with rotation/cooldown |
+| Auth profiles | ✅ | AuthProfileManager with key rotation |
 | userTimezone | ❌ | Timezone config |
 | bootstrapMaxChars | ✅ | 20000 default |
 | bootstrapTotalMaxChars | ✅ | 150000 default |
