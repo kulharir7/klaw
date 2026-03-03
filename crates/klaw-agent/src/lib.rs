@@ -6,6 +6,7 @@ pub mod loop_detection;
 pub mod prompt;
 pub mod provider;
 pub mod providers;
+pub mod retry;
 pub mod slash_commands;
 pub mod thinking;
 
@@ -17,4 +18,5 @@ pub use loop_detection::{LoopDetector, LoopStatus};
 pub use prompt::SystemPromptBuilder;
 pub use provider::LlmProvider;
 pub use providers::{AnthropicProvider, OpenAiProvider, create_provider, list_providers};
+pub use retry::{RetryConfig, RetryCondition, RetryState, with_retry, with_retry_status};
 pub use thinking::{ThinkingConfig, ThinkingLevel};
