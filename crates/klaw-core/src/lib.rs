@@ -10,6 +10,7 @@ pub mod permissions;
 pub mod rate_limit;
 pub mod sanitize;
 pub mod secrets;
+pub mod bonjour;
 pub mod session;
 pub mod streaming;
 pub mod thread_bindings;
