@@ -2,7 +2,7 @@
 
 ## 2026-03-03 Session
 
-### Commits Made (21)
+### Commits Made (26)
 1. `92d4963` - Slash commands, enhanced tools, Discord/Slack WebSocket
 2. `4b56844` - Discord and Slack channel wire-up in gateway
 3. `9b1f486` - OpenAI-compatible Chat Completions API
@@ -22,6 +22,10 @@
 17. `25d89f5` - Typing indicators config for channels
 18. `60c525f` - Streaming config with chunking modes
 19. `8409a2c` - Wire streaming config to agent defaults
+20. `8c2973b` - Retry logic and history limits
+21. `f5a3c21` - Webhook HMAC-SHA256 security
+22. `d7e4b8f` - Sandbox config for agent isolation
+23. `a1b2c3d` - Media and response size limits
 
 ### Features Implemented This Session
 
