@@ -2,7 +2,7 @@
 
 ## 2026-03-03 Session
 
-### Commits Made (7)
+### Commits Made (8)
 1. `92d4963` - Slash commands, enhanced tools, Discord/Slack WebSocket
 2. `4b56844` - Discord and Slack channel wire-up in gateway  
 3. `9b1f486` - OpenAI-compatible Chat Completions API
@@ -10,6 +10,7 @@
 5. `0fc8b62` - Streaming support for WebSocket agent handler
 6. `245a02e` - Session management and cleanup features
 7. `f43f6c3` - Update PROGRESS.md
+8. `d7180fe` - Add onboard and setup CLI commands
 
 ### Features Implemented
 

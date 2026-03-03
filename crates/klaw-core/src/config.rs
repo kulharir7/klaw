@@ -398,6 +398,7 @@ pub struct AgentDefaults {
     pub typing_mode: Option<String>,
     pub typing_interval_seconds: Option<u32>,
     pub human_delay: Option<HumanDelayConfig>,
+    pub heartbeat_every: Option<String>,
 }
 
 impl Default for AgentDefaults {
@@ -430,6 +431,7 @@ impl Default for AgentDefaults {
             typing_mode: None,
             typing_interval_seconds: None,
             human_delay: None,
+            heartbeat_every: None,
         }
     }
 }

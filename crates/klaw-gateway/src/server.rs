@@ -267,18 +267,168 @@ pub async fn start_gateway(config: Config) -> anyhow::Result<()> {
         }
     }
 
-    // Start cron scheduler
+    // Start cron scheduler with task processor
     {
+        let state_clone = state.clone();
         tokio::spawn(async move {
             match crate::cron_scheduler::CronScheduler::load_jobs() {
                 Ok(mut scheduler) => {
-                    if !scheduler.job_count() == 0 {
-                        info!("⏰ Cron scheduler started ({} jobs)", scheduler.job_count());
-                        let (cron_tx, _cron_rx) = tokio::sync::mpsc::channel::<String>(16);
+                    let job_count = scheduler.job_count();
+                    if job_count > 0 {
+                        info!("⏰ Cron scheduler started ({} jobs)", job_count);
+                        let (cron_tx, mut cron_rx) = tokio::sync::mpsc::channel::<String>(16);
+                        
+                        // Spawn task processor
+                        let processor_state = state_clone.clone();
+                        tokio::spawn(async move {
+                            while let Some(task) = cron_rx.recv().await {
+                                info!("📋 Processing cron task: {}", task);
+                                // Process the task through the agent
+                                let state_guard = processor_state.read().await;
+                                let config = &state_guard.config;
+                                let workspace = config.workspace_dir().to_string_lossy().to_string();
+                                
+                                // Create a simple agent request for the task
+                                let model = config.agents.defaults.model.clone()
+                                    .unwrap_or_else(|| "anthropic/claude-sonnet-4-20250514".to_string());
+                                
+                                let tools_reg = klaw_tools::create_default_registry(None);
+                                let tool_names: Vec<&str> = tools_reg.list();
+                                let system_prompt = klaw_agent::SystemPromptBuilder::new(&workspace, &model)
+                                    .with_tools(&tool_names)
+                                    .with_channel("cron")
+                                    .build();
+                                
+                                let agent_config = klaw_agent::AgentConfig {
+                                    model,
+                                    system_prompt,
+                                    max_tool_rounds: 5,
+                                    ..Default::default()
+                                };
+                                
+                                let tool_ctx = klaw_tools::ToolContext {
+                                    workspace_dir: workspace,
+                                    session_key: "cron:main".to_string(),
+                                    agent_id: "cron".to_string(),
+                                };
+                                
+                                let key = SessionKey::main("cron");
+                                let mut session = state_guard.session_store.get_or_create(&key, "cron").await;
+                                drop(state_guard);
+                                
+                                // Run agent
+                                match run_agent(
+                                    state_clone.read().await.provider.as_ref(),
+                                    &tools_reg,
+                                    &mut session,
+                                    &task,
+                                    &agent_config,
+                                    &tool_ctx,
+                                ).await {
+                                    Ok(result) => {
+                                        let preview: String = result.response.chars().take(100).collect();
+                                        info!("✅ Cron task completed: {}", preview);
+                                    }
+                                    Err(e) => {
+                                        warn!("❌ Cron task failed: {}", e);
+                                    }
+                                }
+                                
+                                // Save session
+                                state_clone.read().await.session_store.update(&session).await;
+                            }
+                        });
+                        
                         scheduler.run(cron_tx).await;
+                    } else {
+                        info!("⏰ No cron jobs to schedule");
                     }
                 }
                 Err(e) => warn!("Cron scheduler load failed: {}", e),
+            }
+        });
+    }
+
+    // Start heartbeat if configured
+    {
+        let state_clone = state.clone();
+        tokio::spawn(async move {
+            let state_guard = state_clone.read().await;
+            let config = &state_guard.config;
+            
+            // Check for heartbeat config in agent defaults
+            if let Some(every) = &config.agents.defaults.heartbeat_every {
+                let interval = match crate::heartbeat_parser::parse_heartbeat_interval(every) {
+                    Some(d) => d,
+                    None => {
+                        warn!("Invalid heartbeat interval: {}", every);
+                        return;
+                    }
+                };
+                
+                info!("💓 Heartbeat started: interval={}s", interval.as_secs());
+                drop(state_guard);
+                
+                let mut interval_timer = tokio::time::interval(interval);
+                interval_timer.tick().await; // Skip first tick
+                
+                loop {
+                    interval_timer.tick().await;
+                    info!("💓 Heartbeat tick");
+                    
+                    // Process heartbeat through agent
+                    let state_guard = state_clone.read().await;
+                    let config = &state_guard.config;
+                    let workspace = config.workspace_dir().to_string_lossy().to_string();
+                    let model = config.agents.defaults.model.clone()
+                        .unwrap_or_else(|| "anthropic/claude-sonnet-4-20250514".to_string());
+                    
+                    let tools_reg = klaw_tools::create_default_registry(None);
+                    let system_prompt = klaw_agent::SystemPromptBuilder::new(&workspace, &model)
+                        .with_tools(&tools_reg.list())
+                        .with_channel("heartbeat")
+                        .build();
+                    
+                    let agent_config = klaw_agent::AgentConfig {
+                        model,
+                        system_prompt,
+                        max_tool_rounds: 5,
+                        ..Default::default()
+                    };
+                    
+                    let tool_ctx = klaw_tools::ToolContext {
+                        workspace_dir: workspace,
+                        session_key: "heartbeat:main".to_string(),
+                        agent_id: "heartbeat".to_string(),
+                    };
+                    
+                    let key = SessionKey::main("heartbeat");
+                    let mut session = state_guard.session_store.get_or_create(&key, "heartbeat").await;
+                    
+                    // Check for HEARTBEAT.md
+                    let heartbeat_prompt = if std::path::Path::new(&config.workspace_dir()).join("HEARTBEAT.md").exists() {
+                        if let Ok(content) = std::fs::read_to_string(config.workspace_dir().join("HEARTBEAT.md")) {
+                            format!("Read and follow instructions from HEARTBEAT.md:\n\n{}", content)
+                        } else {
+                            "HEARTBEAT_OK".to_string()
+                        }
+                    } else {
+                        "HEARTBEAT_OK".to_string()
+                    };
+                    
+                    drop(state_guard);
+                    
+                    let _ = run_agent(
+                        state_clone.read().await.provider.as_ref(),
+                        &tools_reg,
+                        &mut session,
+                        &heartbeat_prompt,
+                        &agent_config,
+                        &tool_ctx,
+                    ).await;
+                    
+                    state_clone.read().await.session_store.update(&session).await;
+                }
             }
         });
     }
