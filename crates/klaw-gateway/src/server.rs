@@ -187,6 +187,7 @@ pub async fn start_gateway(config: Config) -> anyhow::Result<()> {
         }))
         .route("/__klaw__/canvas/{path:.*}", get(canvas_handler))
         .route("/__klaw__/a2ui/{path:.*}", get(a2ui_handler))
+        .route("/dashboard", get(dashboard_handler))
         .route("/webhook", post({
             let state = state.clone();
             move |headers: HeaderMap, body: Bytes| webhook_handler(headers, body, state)
@@ -478,6 +479,10 @@ fn create_llm_provider(config: &Config) -> anyhow::Result<Box<dyn LlmProvider>> 
 
 async fn webchat_handler() -> Html<&'static str> {
     Html(include_str!("../../../webchat/index.html"))
+}
+
+async fn dashboard_handler() -> Html<&'static str> {
+    Html(include_str!("../../../webchat/dashboard.html"))
 }
 
 async fn health_handler_with_state(state: Arc<RwLock<GatewayState>>) -> Json<serde_json::Value> {

@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Klaw Dashboard</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0a0a1a;--card:#1a1a2e;--text:#e0e0f0;--text-dim:#8888aa;
+  --accent:#4ecdc4;--success:#4ecdc4;--warning:#f0c040;--error:#ff6b6b;
+  --radius:12px;
+}
+body{font-family:system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;padding:20px}
+h1{font-size:1.5rem;margin-bottom:20px;display:flex;align-items:center;gap:10px}
+h1 span{color:var(--accent)}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;margin-bottom:20px}
+.card{background:var(--card);border-radius:var(--radius);padding:20px}
+.card h2{font-size:0.85rem;color:var(--text-dim);margin-bottom:8px;text-transform:uppercase;letter-spacing:0.5px}
+.card .value{font-size:2rem;font-weight:700;color:var(--accent)}
+.card .sub{font-size:0.8rem;color:var(--text-dim);margin-top:4px}
+.status{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:20px;font-size:0.8rem;font-weight:500}
+.status.online{background:#1a4a3a;color:#4ecdc4}
+.status.offline{background:#4a2a2a;color:#ff6b6b}
+.status .dot{width:6px;height:6px;border-radius:50%;background:currentColor}
+pre{background:#0d1117;padding:12px;border-radius:8px;overflow-x:auto;font-size:0.85rem}
+.tabs{display:flex;gap:8px;margin-bottom:16px}
+.tab{padding:8px 16px;border-radius:8px;font-size:0.9rem;cursor:pointer;background:var(--card);border:none;color:var(--text-dim);transition:all 0.2s}
+.tab:hover{color:var(--text)}
+.tab.active{background:var(--accent);color:#0a0a1a}
+section{display:none}
+section.active{display:block}
+.refresh-btn{background:var(--accent);color:#0a0a1a;border:none;padding:8px 16px;border-radius:8px;cursor:pointer;font-weight:500}
+.refresh-btn:hover{opacity:0.9}
+.header{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px}
+table{width:100%;border-collapse:collapse}
+th,td{text-align:left;padding:10px 12px;border-bottom:1px solid #222;font-size:0.9rem}
+th{color:var(--text-dim);font-weight:500}
+.channel-badge{display:inline-block;padding:3px 8px;border-radius:4px;font-size:0.75rem;font-weight:500}
+.channel-badge.telegram{background:#0088cc}
+.channel-badge.discord{background:#5865f2}
+.channel-badge.slack{background:#e01e5a}
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>🦀 <span>Klaw</span> Dashboard</h1>
+  <button class="refresh-btn" onclick="refresh()">↻ Refresh</button>
+</div>
+
+<div class="tabs">
+  <button class="tab active" onclick="showTab('overview')">Overview</button>
+  <button class="tab" onclick="showTab('sessions')">Sessions</button>
+  <button class="tab" onclick="showTab('channels')">Channels</button>
+  <button class="tab" onclick="showTab('config')">Config</button>
+</div>
+
+<section id="overview" class="active">
+  <div class="grid">
+    <div class="card">
+      <h2>Uptime</h2>
+      <div class="value" id="uptime">--</div>
+      <div class="sub" id="version">v--</div>
+    </div>
+    <div class="card">
+      <h2>Connected Clients</h2>
+      <div class="value" id="clients">0</div>
+      <div class="sub">active connections</div>
+    </div>
+    <div class="card">
+      <h2>Sessions</h2>
+      <div class="value" id="sessions">0</div>
+      <div class="sub" id="session-msgs">0 messages</div>
+    </div>
+    <div class="card">
+      <h2>Tokens Used</h2>
+      <div class="value" id="tokens">0</div>
+      <div class="sub" id="tokens-detail">input: 0 / output: 0</div>
+    </div>
+  </div>
+  <div class="card">
+    <h2>System Status</h2>
+    <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:12px">
+      <span class="status online" id="status-gateway"><span class="dot"></span> Gateway Running</span>
+      <span class="status" id="status-model"><span class="dot"></span> Model: --</span>
+    </div>
+  </div>
+</section>
+
+<section id="sessions">
+  <div class="card">
+    <h2>Active Sessions</h2>
+    <table>
+      <thead>
+        <tr><th>Session Key</th><th>Agent</th><th>Messages</th><th>Tokens</th><th>Last Active</th></tr>
+      </thead>
+      <tbody id="sessions-table">
+        <tr><td colspan="5" style="color:var(--text-dim)">Loading...</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="channels">
+  <div class="grid">
+    <div class="card">
+      <h2>Telegram</h2>
+      <div id="tg-status"><span class="status offline"><span class="dot"></span> Disabled</span></div>
+    </div>
+    <div class="card">
+      <h2>Discord</h2>
+      <div id="dc-status"><span class="status offline"><span class="dot"></span> Disabled</span></div>
+    </div>
+    <div class="card">
+      <h2>Slack</h2>
+      <div id="sl-status"><span class="status offline"><span class="dot"></span> Disabled</span></div>
+    </div>
+  </div>
+  <div class="card">
+    <h2>Channel Configuration</h2>
+    <pre id="channel-config">Loading...</pre>
+  </div>
+</section>
+
+<section id="config">
+  <div class="card">
+    <h2>Current Configuration</h2>
+    <pre id="config-output">Loading...</pre>
+  </div>
+</section>
+
+<script>
+const GATEWAY = window.location.origin;
+
+async function fetchAPI(endpoint) {
+  try {
+    const res = await fetch(`${GATEWAY}${endpoint}`);
+    return await res.json();
+  } catch (e) {
+    console.error('API error:', e);
+    return null;
+  }
+}
+
+async function refresh() {
+  // Stats
+  const stats = await fetchAPI('/api/stats');
+  if (stats) {
+    document.getElementById('uptime').textContent = stats.uptime_human || '--';
+    document.getElementById('version').textContent = `v${stats.version || '--'}`;
+    document.getElementById('clients').textContent = stats.connected_clients || 0;
+    document.getElementById('sessions').textContent = stats.sessions?.total || 0;
+    document.getElementById('session-msgs').textContent = `${stats.sessions?.messages || 0} messages`;
+    document.getElementById('tokens').textContent = formatNumber(stats.sessions?.tokens || 0);
+    document.getElementById('status-model').innerHTML = `<span class="dot"></span> Model: ${stats.model || '--'}`;
+  }
+
+  // Usage
+  const usage = await fetchAPI('/api/usage');
+  if (usage) {
+    document.getElementById('tokens-detail').textContent = `input: ${formatNumber(usage.tokens?.input || 0)} / output: ${formatNumber(usage.tokens?.output || 0)}`;
+  }
+
+  // Config
+  const config = await fetchAPI('/api/config');
+  if (config) {
+    document.getElementById('config-output').textContent = JSON.stringify(config, null, 2);
+    
+    // Update channel status
+    const tgStatus = config.channels?.telegram ? 'online' : 'offline';
+    document.getElementById('tg-status').innerHTML = `<span class="status ${tgStatus}"><span class="dot"></span> ${tgStatus === 'online' ? 'Connected' : 'Disabled'}</span>`;
+    
+    const dcStatus = config.channels?.discord ? 'online' : 'offline';
+    document.getElementById('dc-status').innerHTML = `<span class="status ${dcStatus}"><span class="dot"></span> ${dcStatus === 'online' ? 'Connected' : 'Disabled'}</span>`;
+    
+    const slStatus = config.channels?.slack ? 'online' : 'offline';
+    document.getElementById('sl-status').innerHTML = `<span class="status ${slStatus}"><span class="dot"></span> ${slStatus === 'online' ? 'Connected' : 'Disabled'}</span>`;
+    
+    document.getElementById('channel-config').textContent = JSON.stringify(config.channels, null, 2);
+  }
+}
+
+function formatNumber(n) {
+  if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+  if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
+  return n.toString();
+}
+
+function showTab(name) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('section').forEach(s => s.classList.remove('active'));
+  document.querySelector(`.tab[onclick="showTab('${name}')"]`).classList.add('active');
+  document.getElementById(name).classList.add('active');
+}
+
+// Initial load
+refresh();
+// Auto-refresh every 10 seconds
+setInterval(refresh, 10000);
+</script>
+</body>
+</html>
