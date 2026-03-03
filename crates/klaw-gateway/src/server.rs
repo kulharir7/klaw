@@ -149,6 +149,11 @@ pub async fn start_gateway(config: Config) -> anyhow::Result<()> {
     let provider: Box<dyn LlmProvider> = create_llm_provider(&config)?;
     info!("LLM provider: {}", provider.name());
 
+    // Create concurrency limiter
+    let max_concurrent = config.agents.defaults.max_concurrent.unwrap_or(10) as usize;
+    let concurrent_semaphore = Arc::new(tokio::sync::Semaphore::new(max_concurrent));
+    info!("Max concurrent requests: {}", max_concurrent);
+
     let state = Arc::new(RwLock::new(GatewayState {
         config: config.clone(),
         session_store: SessionStore::new(config.clone()),
@@ -189,7 +194,7 @@ pub async fn start_gateway(config: Config) -> anyhow::Result<()> {
         .route("/ws", get({
             let state = state.clone();
             move |ws: WebSocketUpgrade| async move {
-                ws.on_upgrade(move |socket| handle_ws_connection(socket, state))
+                ws.on_upgrade(move |socket| handle_ws_connection(socket, state, concurrent_semaphore.clone()))
             }
         }))
         // OpenAI-compatible API endpoints
@@ -550,7 +555,7 @@ async fn webhook_handler(
     }
 }
 
-async fn handle_ws_connection(mut socket: WebSocket, state: Arc<RwLock<GatewayState>>) {
+async fn handle_ws_connection(mut socket: WebSocket, state: Arc<RwLock<GatewayState>>, concurrent_semaphore: Arc<tokio::sync::Semaphore>) {
     info!("New WebSocket connection");
     let nonce = uuid::Uuid::new_v4().to_string();
 
@@ -837,6 +842,10 @@ async fn handle_ws_connection(mut socket: WebSocket, state: Arc<RwLock<GatewaySt
 
                         // Check if streaming is requested
                         let stream_mode = frame["params"]["stream"].as_bool().unwrap_or(false);
+
+                        // Acquire semaphore permit for concurrent request limiting
+                        let _permit = concurrent_semaphore.acquire().await.expect("Semaphore closed");
+                        info!("Agent request acquired permit (available: {})", concurrent_semaphore.available_permits());
 
                         let result = if stream_mode {
                             // Streaming mode - forward chunks to WebSocket
