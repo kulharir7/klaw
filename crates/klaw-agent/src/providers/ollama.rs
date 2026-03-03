@@ -72,10 +72,14 @@ impl OllamaProvider {
     
     /// Get API endpoint based on provider
     fn get_endpoint(&self) -> String {
+        // For Ollama Cloud, use the base URL + /api/chat
+        // For local Ollama, use localhost:11434/api/chat
         if self.base_url.contains("ollama.com") {
-            "https://ollama.com/api/chat".to_string()
+            // Ollama Cloud
+            format!("{}/api/chat", self.base_url.trim_end_matches('/').trim_end_matches("/v1"))
         } else {
-            format!("{}/api/chat", self.base_url)
+            // Local Ollama
+            format!("{}/api/chat", self.base_url.trim_end_matches('/'))
         }
     }
 }
