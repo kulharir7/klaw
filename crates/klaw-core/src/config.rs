@@ -200,6 +200,29 @@ pub struct ApplyPatchConfig {
 pub struct ChannelDefaults {
     pub group_policy: Option<String>,
     pub heartbeat: Option<ChannelHeartbeatConfig>,
+    pub typing: Option<TypingConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TypingConfig {
+    /// Typing mode: never, instant, thinking, message
+    #[serde(default = "default_typing_mode")]
+    pub mode: String,
+    /// Show typing indicator for this many seconds
+    #[serde(default = "default_typing_seconds")]
+    pub seconds: u32,
+}
+
+fn default_typing_mode() -> String { "message".to_string() }
+fn default_typing_seconds() -> u32 { 3 }
+
+impl Default for TypingConfig {
+    fn default() -> Self {
+        Self {
+            mode: default_typing_mode(),
+            seconds: default_typing_seconds(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
