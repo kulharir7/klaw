@@ -19,3 +19,4 @@ tracing = { workspace = true }
 tokio = { workspace = true }
 rand = "0.8"
 base64 = "0.22"
+jsonwebtoken = "9.3"
