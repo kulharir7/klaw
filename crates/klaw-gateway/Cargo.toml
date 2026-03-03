@@ -29,3 +29,4 @@ reqwest = { workspace = true }
 sha2 = "0.10"
 hmac = "0.12"
 hex = "0.4"
+async-trait = "0.1"

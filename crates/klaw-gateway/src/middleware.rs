@@ -153,7 +153,7 @@ impl MiddlewareChain {
     
     /// Run after hooks
     pub async fn run_after(&self, ctx: &RequestContext, result: &MiddlewareResult) -> Result<(), MiddlewareError> {
-        for middleware in &self.middlewares.iter().rev() {
+        for middleware in self.middlewares.iter().rev() {
             middleware.after(ctx, result).await?;
         }
         Ok(())
