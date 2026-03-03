@@ -224,6 +224,36 @@ pub async fn start_gateway(config: Config) -> anyhow::Result<()> {
         }
     }
 
+    // Start Discord channel if configured
+    if let Some(ref discord_config) = config.channels.discord {
+        let bot_token = &discord_config.bot_token;
+        if !bot_token.is_empty() {
+            info!("🎮 Starting Discord channel...");
+            let discord_state = state.clone();
+            let token = bot_token.clone();
+            tokio::spawn(async move {
+                if let Err(e) = run_discord_loop(token, discord_state).await {
+                    tracing::error!("Discord channel error: {}", e);
+                }
+            });
+        }
+    }
+
+    // Start Slack channel if configured
+    if let Some(ref slack_config) = config.channels.slack {
+        let bot_token = slack_config.bot_token.clone().unwrap_or_default();
+        let app_token = slack_config.app_token.clone();
+        if !bot_token.is_empty() {
+            info!("💼 Starting Slack channel...");
+            let slack_state = state.clone();
+            tokio::spawn(async move {
+                if let Err(e) = run_slack_loop(bot_token, app_token, slack_state).await {
+                    tracing::error!("Slack channel error: {}", e);
+                }
+            });
+        }
+    }
+
     // Start cron scheduler
     {
         tokio::spawn(async move {
@@ -1143,4 +1173,101 @@ async fn handle_slash_command(
         // Unknown slash command — could be a custom command or just let agent handle
         _ => SlashCommand::ContinueToAgent
     }
+}
+
+/// Run Discord Gateway WebSocket loop
+async fn run_discord_loop(bot_token: String, state: Arc<RwLock<GatewayState>>) -> anyhow::Result<()> {
+    use klaw_channels::Channel;
+    use klaw_channels::channels::discord::DiscordChannel;
+    
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<klaw_core::types::InboundMessage>(64);
+    
+    let mut channel = DiscordChannel::new(&bot_token);
+    
+    // Spawn the channel start in a separate task
+    let channel_state = state.clone();
+    tokio::spawn(async move {
+        if let Err(e) = channel.start(tx).await {
+            tracing::error!("Discord channel error: {}", e);
+        }
+    });
+    
+    // Process incoming messages
+    while let Some(msg) = rx.recv().await {
+        info!("📩 Discord [{} / {}]: {:?}", msg.sender_name.as_deref().unwrap_or("?"), msg.chat_id, msg.text);
+        
+        // Handle slash commands
+        if let Some(ref text) = msg.text {
+            if text.starts_with('/') {
+                let session_key = SessionKey::group("discord", "discord", &msg.chat_id);
+                match handle_slash_command(text, &channel_state, &session_key).await {
+                    SlashCommand::Handled(response) => {
+                        // Send response back to Discord
+                        let client = reqwest::Client::new();
+                        let _ = client.post(&format!("https://discord.com/api/v10/channels/{}/messages", msg.chat_id))
+                            .header("Authorization", format!("Bot {}", bot_token))
+                            .json(&serde_json::json!({ "content": response }))
+                            .send().await;
+                        continue;
+                    }
+                    _ => {}
+                }
+            }
+        }
+        
+        // Run agent with the message
+        // TODO: Implement agent call similar to Telegram
+    }
+    
+    Ok(())
+}
+
+/// Run Slack Socket Mode loop
+async fn run_slack_loop(bot_token: String, app_token: Option<String>, state: Arc<RwLock<GatewayState>>) -> anyhow::Result<()> {
+    use klaw_channels::Channel;
+    use klaw_channels::channels::slack::SlackChannel;
+    
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<klaw_core::types::InboundMessage>(64);
+    
+    let mut channel = SlackChannel::new(&bot_token, app_token);
+    
+    // Spawn the channel start in a separate task
+    let slack_state = state.clone();
+    tokio::spawn(async move {
+        if let Err(e) = channel.start(tx).await {
+            tracing::error!("Slack channel error: {}", e);
+        }
+    });
+    
+    // Process incoming messages
+    while let Some(msg) = rx.recv().await {
+        info!("📩 Slack [{} / {}]: {:?}", msg.sender_name.as_deref().unwrap_or("?"), msg.chat_id, msg.text);
+        
+        // Handle slash commands
+        if let Some(ref text) = msg.text {
+            if text.starts_with('/') {
+                let session_key = SessionKey::group("slack", "slack", &msg.chat_id);
+                match handle_slash_command(text, &slack_state, &session_key).await {
+                    SlashCommand::Handled(response) => {
+                        // Send response back to Slack
+                        let client = reqwest::Client::new();
+                        let _ = client.post("https://slack.com/api/chat.postMessage")
+                            .header("Authorization", format!("Bearer {}", bot_token))
+                            .json(&serde_json::json!({ 
+                                "channel": msg.chat_id, 
+                                "text": response 
+                            }))
+                            .send().await;
+                        continue;
+                    }
+                    _ => {}
+                }
+            }
+        }
+        
+        // Run agent with the message
+        // TODO: Implement agent call similar to Telegram
+    }
+    
+    Ok(())
 }
