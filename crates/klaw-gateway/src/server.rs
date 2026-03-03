@@ -668,16 +668,82 @@ async fn handle_ws_connection(mut socket: WebSocket, state: Arc<RwLock<GatewaySt
                         let key = SessionKey::main("default");
                         let mut session = state_guard.session_store.get_or_create(&key, "default").await;
 
-                        // TODO: Proper streaming integration (needs channel forwarding during agent run)
-                        // For now, streaming mode just includes the response in one shot
-                        let result = run_agent(
-                            state_guard.provider.as_ref(),
-                            &tools_reg,
-                            &mut session,
-                            user_msg,
-                            &agent_config,
-                            &tool_ctx,
-                        ).await;
+                        // Check if streaming is requested
+                        let stream_mode = frame["params"]["stream"].as_bool().unwrap_or(false);
+
+                        let result = if stream_mode {
+                            // Streaming mode - forward chunks to WebSocket
+                            let (tx, mut rx) = tokio::sync::mpsc::channel::<klaw_core::types::StreamChunk>(64);
+                            let (ws_tx, mut ws_rx) = tokio::sync::mpsc::channel::<String>(64);
+                            let run_id_clone = run_id.clone();
+
+                            // Spawn task to forward stream chunks to ws_tx channel
+                            let run_id_for_forward = run_id_clone.clone();
+                            let forwarder = tokio::spawn(async move {
+                                while let Some(chunk) = rx.recv().await {
+                                    let event = match &chunk {
+                                        klaw_core::types::StreamChunk::Text(text) => serde_json::json!({
+                                            "type": "event", "event": "agent", "runId": run_id_for_forward,
+                                            "payload": { "stream": "text", "delta": text }
+                                        }),
+                                        klaw_core::types::StreamChunk::ToolCallStart { id, name } => serde_json::json!({
+                                            "type": "event", "event": "agent", "runId": run_id_for_forward,
+                                            "payload": { "stream": "tool_start", "toolId": id, "name": name }
+                                        }),
+                                        klaw_core::types::StreamChunk::ToolCallDelta { id, arguments } => serde_json::json!({
+                                            "type": "event", "event": "agent", "runId": run_id_for_forward,
+                                            "payload": { "stream": "tool_delta", "toolId": id, "delta": arguments }
+                                        }),
+                                        klaw_core::types::StreamChunk::ToolCallEnd { id } => serde_json::json!({
+                                            "type": "event", "event": "agent", "runId": run_id_for_forward,
+                                            "payload": { "stream": "tool_end", "toolId": id }
+                                        }),
+                                        klaw_core::types::StreamChunk::Done { usage } => serde_json::json!({
+                                            "type": "event", "event": "agent", "runId": run_id_for_forward,
+                                            "payload": { "stream": "done", "usage": usage }
+                                        }),
+                                        klaw_core::types::StreamChunk::Error(e) => serde_json::json!({
+                                            "type": "event", "event": "agent", "runId": run_id_for_forward,
+                                            "payload": { "stream": "error", "error": e }
+                                        }),
+                                    };
+                                    if ws_tx.send(event.to_string()).await.is_err() {
+                                        break;
+                                    }
+                                }
+                            });
+
+                            // Run agent with streaming
+                            let result = klaw_agent::run_agent_streaming(
+                                state_guard.provider.as_ref(),
+                                &tools_reg,
+                                &mut session,
+                                user_msg,
+                                &agent_config,
+                                &tool_ctx,
+                                tx,
+                            ).await;
+
+                            // Forward any remaining ws messages
+                            while let Some(msg) = ws_rx.recv().await {
+                                let _ = socket.send(Message::Text(msg.into())).await;
+                            }
+
+                            // Wait for forwarder to finish
+                            let _ = forwarder.await;
+
+                            result
+                        } else {
+                            // Non-streaming mode
+                            run_agent(
+                                state_guard.provider.as_ref(),
+                                &tools_reg,
+                                &mut session,
+                                user_msg,
+                                &agent_config,
+                                &tool_ctx,
+                            ).await
+                        };
 
                         state_guard.session_store.update(&session).await;
                         drop(state_guard);
