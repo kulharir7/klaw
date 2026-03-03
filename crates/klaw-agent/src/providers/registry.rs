@@ -9,6 +9,7 @@ use tracing::info;
 pub enum ApiType {
     OpenAiCompletions,
     AnthropicMessages,
+    OllamaApi,
 }
 
 /// Provider definition
@@ -308,6 +309,15 @@ pub fn built_in_providers() -> HashMap<String, ProviderDef> {
         auto_discover: true,
     });
 
+    p.insert("ollama-cloud".into(), ProviderDef {
+        name: "Ollama Cloud".into(),
+        base_url: "https://ollama.com/v1".into(),
+        api_type: ApiType::OpenAiCompletions,
+        env_key: "OLLAMA_API_KEY".into(),
+        env_keys_alt: vec!["OLLAMA_CLOUD_API_KEY".into()],
+        auto_discover: false,
+    });
+
     p.insert("vllm".into(), ProviderDef {
         name: "vLLM".into(),
         base_url: "http://127.0.0.1:8000/v1".into(),
@@ -420,6 +430,15 @@ pub fn create_provider(
         }
         ApiType::AnthropicMessages => {
             Box::new(AnthropicProvider::new(&api_key))
+        }
+        ApiType::OllamaApi => {
+            // Ollama Cloud uses OpenAI-compatible API with Bearer token
+            let url = if base_url.ends_with("/v1") {
+                base_url.to_string()
+            } else {
+                format!("{}/v1", base_url)
+            };
+            Box::new(OpenAiProvider::new(&url, &api_key, provider_name))
         }
     };
 
