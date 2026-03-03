@@ -31,6 +31,7 @@ pub struct AgentConfig {
     pub compaction: CompactionConfig,
     pub pruning: PruningConfig,
     pub max_context_tokens: u64,
+    pub timeout: Option<Duration>,
 }
 
 impl Default for AgentConfig {
@@ -49,6 +50,7 @@ impl Default for AgentConfig {
             compaction: CompactionConfig::default(),
             pruning: PruningConfig::default(),
             max_context_tokens: 128000,
+            timeout: Some(Duration::from_secs(300)), // 5 minutes default
         }
     }
 }
@@ -110,16 +112,17 @@ pub async fn run_agent(
         let mut messages = vec![Message::system(&config.system_prompt)];
         messages.extend(session.messages.clone());
 
-        // Call LLM with failover
+        // Call LLM with failover (and optional timeout)
         let messages_clone = messages.clone();
         let tools_clone = tool_schemas.clone();
         let temperature = config.temperature;
         let max_tokens = config.max_tokens;
         let thinking_level = config.thinking.clone();
+        let timeout_duration = config.timeout;
 
         info!("Agent round {} — calling LLM (model: {})", round + 1, config.model);
 
-        let (response, used_model) = failover_chain
+        let llm_future = failover_chain
             .execute(|model, _key| {
                 let model = model.to_string();
                 let msgs = messages_clone.clone();
@@ -138,8 +141,19 @@ pub async fn run_agent(
                     tl.apply_to_request(&mut request);
                     provider.chat(request).await
                 }
-            })
-            .await?;
+            });
+
+        let (response, used_model) = if let Some(timeout_dur) = timeout_duration {
+            match tokio::time::timeout(timeout_dur, llm_future).await {
+                Ok(result) => result?,
+                Err(_) => {
+                    error!("Agent timeout after {:?} in round {}", timeout_dur, round + 1);
+                    return Err(anyhow::anyhow!("Agent timeout after {:?} in round {}", timeout_dur, round + 1));
+                }
+            }
+        } else {
+            llm_future.await?
+        };
         model_used = used_model;
 
         total_input += response.usage.input_tokens;
