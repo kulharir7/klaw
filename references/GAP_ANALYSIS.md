@@ -120,20 +120,20 @@
 | web_fetch | ✅ | HTML→text, SSRF protection |
 | memory_search | ✅ | Keyword search (not semantic yet) |
 | memory_get | ✅ | Snippet read with from/lines |
-| image | 🔸 | Stub → sub-agent converting now |
-| tts | 🔸 | Stub |
-| message | 🔸 | Stub |
-| cron | 🔸 | Stub |
-| gateway | 🔸 | Stub |
-| sessions_list | 🔸 | Stub |
-| sessions_history | 🔸 | Stub |
-| sessions_send | 🔸 | Stub |
-| sessions_spawn | 🔸 | Stub |
-| session_status | 🔸 | Stub |
-| agents_list | 🔸 | Stub |
-| browser | 🔸 | Stub |
-| canvas | 🔸 | Stub |
-| nodes | 🔸 | Stub |
+| image | ✅ | Vision API (OpenAI/Anthropic) |
+| tts | ✅ | OpenAI TTS with cross-platform playback |
+| message | ✅ | Multi-channel messaging |
+| cron | ✅ | Scheduled jobs with gateway integration |
+| gateway | ✅ | Gateway control |
+| sessions_list | ✅ | List sessions |
+| sessions_history | ✅ | Get session history |
+| sessions_send | ✅ | Send message to session |
+| sessions_spawn | ✅ | Spawn sub-agent |
+| session_status | ✅ | Session stats |
+| agents_list | ✅ | List agents |
+| browser | ✅ | Chrome DevTools Protocol |
+| canvas | ✅ | Canvas operations |
+| nodes | ✅ | Node management |
 | Tool policy (profiles/groups/allow/deny) | ✅ | 4 profiles, 10 groups |
 | Tool byProvider filtering | ✅ | Config support |
 | Tool loop detection | ❌ | genericRepeat, knownPollNoProgress, pingPong |
@@ -148,7 +148,7 @@
 | browser: profiles | ❌ | Multi-profile management |
 | browser: Chrome extension relay | ❌ | Attach to existing Chrome |
 | Semantic memory search | ❌ | Embedding-based search |
-| Slash commands | ❌ | /model, /new, /reset, /config, etc. |
+| Slash commands | ✅ | /help, /status, /model, /new, /reset, /usage, /version, /agents |
 | Plugins system | ❌ | Register custom tools |
 | Lobster (workflow runtime) | ❌ | Typed pipelines with approvals |
 | LLM Task tool | ❌ | JSON-only LLM step |
@@ -159,9 +159,9 @@
 | Channel | Status | Notes |
 |---------|--------|-------|
 | WebChat | ✅ | Dark UI, WS-based |
-| Telegram | 🔸 | Code written, not wired to gateway |
-| Discord | 🔸 | Code written, not wired |
-| Slack | 🔸 | Code written, not wired |
+| Telegram | ✅ | Long polling, wired to gateway |
+| Discord | ✅ | Gateway WebSocket, wired to gateway |
+| Slack | ✅ | Socket Mode, wired to gateway |
 | WhatsApp | 🔸 | Sidecar stub |
 | Signal | 🔸 | Sidecar stub |
 | IRC | 🔸 | Stub |
@@ -197,11 +197,11 @@
 | test | ✅ | Quick test |
 | doctor | ✅ | Diagnostics |
 | version | ✅ | Version info |
-| configure (interactive wizard) | ❌ | Guided setup |
-| onboard | ❌ | First-time setup |
-| setup | ❌ | Setup wizard |
-| agents add/list/remove | ❌ | Multi-agent management |
-| sessions list/inspect/reset | ❌ | Session management |
+| configure (interactive wizard) | ✅ | Guided setup |
+| onboard | ✅ | First-time setup wizard |
+| setup | ✅ | Quick provider setup |
+| agents add/list | ✅ | Multi-agent management |
+| sessions list/inspect/reset/send | ✅ | Session management |
 | cron list/add/remove | ❌ | Cron management |
 | browser (control) | ❌ | Browser management |
 | channels login/status/probe | ❌ | Channel management |
@@ -217,7 +217,8 @@
 | webhooks | ❌ | Webhook management |
 | hooks | ❌ | Hooks management |
 | completion | ❌ | Shell completion |
-| reset | ❌ | Factory reset |
+| reset | ✅ | Factory reset with --force |
+| memory search/get/set | ✅ | Memory management |
 | uninstall | ❌ | Cleanup |
 | update | ❌ | Self-update |
 | dns | ❌ | DNS management |
@@ -267,9 +268,9 @@
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| Cron jobs | 🔸 | Tool stub only |
-| Heartbeat polling | ❌ | Periodic agent runs |
-| Webhooks (inbound) | ❌ | HTTP→agent triggers |
+| Cron jobs | ✅ | Cron scheduler + agent processing |
+| Heartbeat polling | ✅ | Configurable via heartbeat_every |
+| Webhooks (inbound) | 🔸 | Webhook endpoint exists |
 | Hooks (event triggers) | ❌ | On-event automation |
 | Polls (periodic checks) | ❌ | Scheduled polling |
 | Gmail PubSub | ❌ | Email notifications |
