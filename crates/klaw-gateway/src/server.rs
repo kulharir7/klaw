@@ -125,6 +125,7 @@ pub struct GatewayState {
     pub presence: HashMap<String, PresenceInfo>,
     pub started_at: Instant,
     pub gateway_token: Option<String>,
+    pub binding_resolver: klaw_core::BindingResolver,
 }
 
 /// Start the gateway HTTP + WebSocket server
@@ -163,6 +164,7 @@ pub async fn start_gateway(config: Config) -> anyhow::Result<()> {
         presence: HashMap::new(),
         started_at: Instant::now(),
         gateway_token,
+        binding_resolver: klaw_core::BindingResolver::from_config(&config),
     }));
 
     // Tick event broadcaster (heartbeat keepalive)
