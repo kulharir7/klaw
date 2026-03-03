@@ -191,6 +191,19 @@ pub async fn start_gateway(config: Config) -> anyhow::Result<()> {
             move |ws: WebSocketUpgrade| async move {
                 ws.on_upgrade(move |socket| handle_ws_connection(socket, state))
             }
+        }))
+        // OpenAI-compatible API endpoints
+        .route("/v1/chat/completions", post({
+            let state = state.clone();
+            move |headers: HeaderMap, body: Bytes| chat_completions_handler(headers, body, state)
+        }))
+        .route("/v1/models", get({
+            let state = state.clone();
+            move || models_handler(state)
+        }))
+        .route("/v1/tools/invoke", post({
+            let state = state.clone();
+            move |headers: HeaderMap, body: Bytes| tools_invoke_handler(headers, body, state)
         }));
 
     info!("🦀 Klaw Gateway v{} starting on {}", env!("CARGO_PKG_VERSION"), addr);
@@ -1270,4 +1283,229 @@ async fn run_slack_loop(bot_token: String, app_token: Option<String>, state: Arc
     }
     
     Ok(())
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// OpenAI-Compatible API Handlers
+// ═══════════════════════════════════════════════════════════════════════════════
+
+#[derive(Debug, serde::Deserialize)]
+struct ChatCompletionRequest {
+    model: String,
+    messages: Vec<ChatMessage>,
+    #[serde(default)]
+    temperature: Option<f32>,
+    #[serde(default)]
+    max_tokens: Option<u64>,
+    #[serde(default)]
+    stream: Option<bool>,
+    #[serde(default)]
+    tools: Option<Vec<ToolDef>>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct ChatMessage {
+    role: String,
+    content: Option<String>,
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    tool_calls: Option<Vec<serde_json::Value>>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct ToolDef {
+    #[serde(rename = "type")]
+    tool_type: String,
+    function: FunctionDef,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct FunctionDef {
+    name: String,
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
+    parameters: Option<serde_json::Value>,
+}
+
+/// OpenAI-compatible chat completions endpoint
+async fn chat_completions_handler(
+    headers: HeaderMap,
+    body: Bytes,
+    state: Arc<RwLock<GatewayState>>,
+) -> Json<serde_json::Value> {
+    // Check auth
+    if let Some(token) = &state.read().await.gateway_token {
+        let auth = headers.get("Authorization")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("");
+        if !auth.starts_with("Bearer ") || &auth[7..] != token {
+            return Json(serde_json::json!({
+                "error": { "message": "Unauthorized", "type": "invalid_request_error" }
+            }));
+        }
+    }
+
+    // Parse request
+    let req: ChatCompletionRequest = match serde_json::from_slice(&body) {
+        Ok(r) => r,
+        Err(e) => return Json(serde_json::json!({
+            "error": { "message": format!("Invalid request: {}", e), "type": "invalid_request_error" }
+        })),
+    };
+
+    info!("OpenAI API request: model={}, messages={}", req.model, req.messages.len());
+
+    // Convert messages
+    let messages: Vec<klaw_core::types::Message> = req.messages.iter().map(|m| {
+        match m.role.as_str() {
+            "system" => klaw_core::types::Message::system(m.content.as_deref().unwrap_or("")),
+            "user" => klaw_core::types::Message::user(m.content.as_deref().unwrap_or("")),
+            "assistant" => klaw_core::types::Message::assistant(m.content.as_deref().unwrap_or("")),
+            _ => klaw_core::types::Message::user(m.content.as_deref().unwrap_or("")),
+        }
+    }).collect();
+
+    // Create chat request
+    let chat_req = klaw_agent::provider::ChatRequest {
+        model: req.model.clone(),
+        messages,
+        tools: None,
+        temperature: req.temperature,
+        max_tokens: req.max_tokens.map(|v| v as u32),
+        stream: req.stream.unwrap_or(false),
+        thinking: None,
+    };
+
+    // Call provider
+    let s = state.read().await;
+    match s.provider.chat(chat_req).await {
+        Ok(response) => {
+            Json(serde_json::json!({
+                "id": format!("chatcmpl-{}", uuid::Uuid::new_v4()),
+                "object": "chat.completion",
+                "created": std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs(),
+                "model": req.model,
+                "choices": [{
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": response.content
+                    },
+                    "finish_reason": "stop"
+                }],
+                "usage": {
+                    "prompt_tokens": response.usage.input_tokens,
+                    "completion_tokens": response.usage.output_tokens,
+                    "total_tokens": response.usage.total_tokens
+                }
+            }))
+        }
+        Err(e) => Json(serde_json::json!({
+            "error": { "message": format!("Provider error: {}", e), "type": "api_error" }
+        })),
+    }
+}
+
+/// List available models (OpenAI-compatible)
+async fn models_handler(state: Arc<RwLock<GatewayState>>) -> Json<serde_json::Value> {
+    let s = state.read().await;
+    let default_model = s.config.agents.defaults.model.clone().unwrap_or_default();
+    
+    Json(serde_json::json!({
+        "object": "list",
+        "data": [
+            {
+                "id": default_model,
+                "object": "model",
+                "created": 1700000000,
+                "owned_by": "klaw"
+            },
+            {
+                "id": "claude-sonnet-4-20250514",
+                "object": "model",
+                "created": 1700000000,
+                "owned_by": "anthropic"
+            },
+            {
+                "id": "gpt-4",
+                "object": "model",
+                "created": 1700000000,
+                "owned_by": "openai"
+            }
+        ]
+    }))
+}
+
+/// Invoke tools directly
+#[derive(Debug, serde::Deserialize)]
+struct ToolsInvokeRequest {
+    tool: String,
+    params: serde_json::Value,
+    #[serde(default)]
+    workspace: Option<String>,
+}
+
+async fn tools_invoke_handler(
+    headers: HeaderMap,
+    body: Bytes,
+    state: Arc<RwLock<GatewayState>>,
+) -> Json<serde_json::Value> {
+    // Check auth
+    if let Some(token) = &state.read().await.gateway_token {
+        let auth = headers.get("Authorization")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("");
+        if !auth.starts_with("Bearer ") || &auth[7..] != token {
+            return Json(serde_json::json!({
+                "error": { "message": "Unauthorized" }
+            }));
+        }
+    }
+
+    // Parse request
+    let req: ToolsInvokeRequest = match serde_json::from_slice(&body) {
+        Ok(r) => r,
+        Err(e) => return Json(serde_json::json!({
+            "error": { "message": format!("Invalid request: {}", e) }
+        })),
+    };
+
+    info!("Tools invoke: tool={}", req.tool);
+
+    // Create tool registry
+    let s = state.read().await;
+    let workspace = req.workspace.clone().unwrap_or_else(|| s.config.workspace_dir().to_string_lossy().to_string());
+    drop(s);
+    let registry = klaw_tools::create_default_registry(None);
+    
+    // Find tool
+    let tool = match registry.get(&req.tool) {
+        Some(t) => t,
+        None => return Json(serde_json::json!({
+            "error": { "message": format!("Tool not found: {}", req.tool) }
+        })),
+    };
+
+    // Create context
+    let ctx = klaw_tools::ToolContext {
+        workspace_dir: workspace,
+        session_key: "api".to_string(),
+        agent_id: "default".to_string(),
+    };
+
+    // Execute tool
+    match tool.execute(req.params, &ctx).await {
+        Ok(result) => Json(serde_json::json!({
+            "ok": !result.is_error,
+            "content": result.content
+        })),
+        Err(e) => Json(serde_json::json!({
+            "error": { "message": format!("Tool error: {}", e) }
+        })),
+    }
 }
