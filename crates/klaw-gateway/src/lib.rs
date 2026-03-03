@@ -5,5 +5,6 @@ pub mod server;
 pub mod webhooks;
 pub mod cors;
 pub mod middleware;
+pub mod health;
 
 pub use server::start_gateway;
