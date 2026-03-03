@@ -293,8 +293,14 @@ function doAuth() {
   connectWS();
 }
 
-// Check if we have a saved connection
-if (token !== null) {
+// Check for auto token from server (local mode)
+if (window.KLAW_AUTO_TOKEN) {
+  token = window.KLAW_AUTO_TOKEN;
+  localStorage.setItem('klaw-token', token);
+}
+
+// Check if we have a saved connection or auth is disabled
+if (token || window.KLAW_AUTH_ENABLED === false) {
   document.getElementById('auth-overlay').classList.add('hidden');
   window.addEventListener('DOMContentLoaded', () => setTimeout(connectWS, 100));
 } else {

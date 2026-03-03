@@ -183,14 +183,20 @@ pub async fn start_gateway(config: Config) -> anyhow::Result<()> {
     });
 
     let app = Router::new()
-        .route("/", get(webchat_handler))
+        .route("/", get({
+            let state = state.clone();
+            move || webchat_handler_with_state(state.clone())
+        }))
         .route("/health", get({
             let state = state.clone();
             move || health_handler_with_state(state)
         }))
         .route("/__klaw__/canvas/{*path}", get(canvas_handler))
         .route("/__klaw__/a2ui/{*path}", get(a2ui_handler))
-        .route("/dashboard", get(dashboard_handler))
+        .route("/dashboard", get({
+            let state = state.clone();
+            move || dashboard_handler_with_state(state.clone())
+        }))
         .route("/webhook", post({
             let state = state.clone();
             move |headers: HeaderMap, body: Bytes| webhook_handler(headers, body, state)
@@ -522,12 +528,50 @@ fn create_llm_provider(config: &Config) -> anyhow::Result<Box<dyn LlmProvider>> 
     Ok(provider)
 }
 
-async fn webchat_handler() -> Html<&'static str> {
-    Html(include_str!("../../../webchat/index.html"))
+async fn webchat_handler_with_state(state: Arc<RwLock<GatewayState>>) -> Html<String> {
+    let s = state.read().await;
+    let token = s.gateway_token.clone();
+    let auth_enabled = token.is_some();
+    
+    // Read the webchat HTML
+    let html = include_str!("../../../webchat/index.html");
+    
+    // Inject the token if available (for local mode convenience)
+    let html_with_token = if let Some(t) = token {
+        // Add a script to auto-connect with the token
+        let inject = format!(
+            r#"<script>window.KLAW_AUTO_TOKEN = "{}"; window.KLAW_AUTH_ENABLED = true;</script>"#,
+            t
+        );
+        html.replace("</head>", &format!("{}\n</head>", inject))
+    } else {
+        html.replace("</head>", r#"<script>window.KLAW_AUTH_ENABLED = false;</script></head>"#)
+    };
+    
+    Html(html_with_token)
 }
 
-async fn dashboard_handler() -> Html<&'static str> {
-    Html(include_str!("../../../webchat/dashboard.html"))
+async fn dashboard_handler_with_state(state: Arc<RwLock<GatewayState>>) -> Html<String> {
+    let s = state.read().await;
+    let token = s.gateway_token.clone();
+    let auth_enabled = token.is_some();
+    
+    // Read the dashboard HTML
+    let html = include_str!("../../../webchat/dashboard.html");
+    
+    // Inject the token if available (for local mode convenience)
+    let html_with_token = if let Some(t) = token {
+        // Add a script to auto-connect with the token
+        let inject = format!(
+            r#"<script>window.KLAW_AUTO_TOKEN = "{}"; window.KLAW_AUTH_ENABLED = true;</script>"#,
+            t
+        );
+        html.replace("</head>", &format!("{}\n</head>", inject))
+    } else {
+        html.replace("</head>", r#"<script>window.KLAW_AUTH_ENABLED = false;</script></head>"#)
+    };
+    
+    Html(html_with_token)
 }
 
 async fn health_handler_with_state(state: Arc<RwLock<GatewayState>>) -> Json<serde_json::Value> {
