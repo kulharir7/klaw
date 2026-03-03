@@ -9,6 +9,7 @@ pub mod process;
 pub mod apply_patch;
 pub mod memory_search;
 pub mod memory_get;
+pub mod memory_set;
 pub mod image;
 pub mod tts;
 pub mod message;
@@ -53,6 +54,7 @@ pub fn create_default_registry(brave_api_key: Option<String>) -> registry::ToolR
     reg.register(std::sync::Arc::new(apply_patch::ApplyPatchTool));
     reg.register(std::sync::Arc::new(memory_search::MemorySearchTool));
     reg.register(std::sync::Arc::new(memory_get::MemoryGetTool));
+    reg.register(std::sync::Arc::new(memory_set::MemorySetTool));
     reg.register(std::sync::Arc::new(image::ImageTool));
     reg.register(std::sync::Arc::new(tts::TtsTool));
     reg.register(std::sync::Arc::new(message::MessageTool));
