@@ -297,6 +297,19 @@ enum MemoryAction {
         /// File path (relative to workspace)
         path: String,
     },
+    /// Write to a memory file
+    Set {
+        /// File path (relative to workspace/memory)
+        path: String,
+        /// Content to write (or use --file to read from file)
+        content: Option<String>,
+        /// Read content from file
+        #[arg(short, long)]
+        file: Option<String>,
+        /// Append instead of overwrite
+        #[arg(short, long)]
+        append: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1130,6 +1143,48 @@ async fn main() -> anyhow::Result<()> {
                         println!("     {}", memory_path.display());
                     }
                 }
+            }
+            MemoryAction::Set { path, content, file, append } => {
+                let config = klaw_core::Config::load()?;
+                
+                // Determine content to write
+                let write_content = if let Some(f) = file {
+                    std::fs::read_to_string(&f)?
+                } else if let Some(c) = content {
+                    c
+                } else {
+                    println!("❌ Either content or --file must be provided");
+                    return Ok(());
+                };
+
+                // Determine target path
+                let memory_dir = config.workspace_dir().join("memory");
+                std::fs::create_dir_all(&memory_dir)?;
+                
+                let target_path = if path.starts_with('/') || path.contains(':') {
+                    // Absolute path or path with drive letter
+                    std::path::PathBuf::from(&path)
+                } else {
+                    // Relative to memory dir
+                    memory_dir.join(&path)
+                };
+
+                // Create parent dirs if needed
+                if let Some(parent) = target_path.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
+
+                // Write or append
+                if append && target_path.exists() {
+                    let existing = std::fs::read_to_string(&target_path)?;
+                    let new_content = format!("{}\n{}", existing.trim_end(), write_content);
+                    std::fs::write(&target_path, &new_content)?;
+                    println!("✅ Appended to: {}", target_path.display());
+                } else {
+                    std::fs::write(&target_path, &write_content)?;
+                    println!("✅ Written to: {}", target_path.display());
+                }
+                println!("   {} bytes", write_content.len());
             }
         },
 
