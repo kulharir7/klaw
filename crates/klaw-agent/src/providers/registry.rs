@@ -313,7 +313,7 @@ pub fn built_in_providers() -> HashMap<String, ProviderDef> {
     p.insert("ollama-cloud".into(), ProviderDef {
         name: "Ollama Cloud".into(),
         base_url: "https://ollama.com".into(),
-        api_type: ApiType::OllamaApi,
+        api_type: ApiType::OpenAiCompletions,  // Use OpenAI-compatible API
         env_key: "OLLAMA_API_KEY".into(),
         env_keys_alt: vec!["OLLAMA_CLOUD_API_KEY".into()],
         auto_discover: false,
