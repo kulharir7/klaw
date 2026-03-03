@@ -474,6 +474,129 @@ pub struct AgentDefaults {
     pub typing_interval_seconds: Option<u32>,
     pub human_delay: Option<HumanDelayConfig>,
     pub heartbeat_every: Option<String>,
+    pub sandbox: Option<SandboxConfig>,
+}
+
+/// Sandbox configuration for agent isolation
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SandboxConfig {
+    /// Enable sandboxing
+    pub enabled: bool,
+    /// Sandbox type: "docker", "bubblewrap", "firejail", "none"
+    pub sandbox_type: String,
+    /// Container image (for Docker)
+    pub image: Option<String>,
+    /// Memory limit in MB
+    pub memory_mb: u32,
+    /// CPU limit (0.0-1.0)
+    pub cpu_limit: f32,
+    /// Timeout in seconds
+    pub timeout_seconds: u32,
+    /// Network access
+    pub network: bool,
+    /// Allow file system access
+    pub filesystem: bool,
+    /// Environment variables to pass
+    pub env: std::collections::HashMap<String, String>,
+    /// Mount points
+    pub mounts: Vec<MountConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MountConfig {
+    pub source: String,
+    pub target: String,
+    pub read_only: bool,
+}
+
+impl Default for SandboxConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            sandbox_type: "none".to_string(),
+            image: None,
+            memory_mb: 512,
+            cpu_limit: 1.0,
+            timeout_seconds: 300,
+            network: true,
+            filesystem: false,
+            env: std::collections::HashMap::new(),
+            mounts: vec![],
+        }
+    }
+}
+
+impl SandboxConfig {
+    /// Create a Docker sandbox config
+    pub fn docker(image: &str) -> Self {
+        Self {
+            enabled: true,
+            sandbox_type: "docker".to_string(),
+            image: Some(image.to_string()),
+            memory_mb: 512,
+            cpu_limit: 0.5,
+            timeout_seconds: 300,
+            network: false,
+            filesystem: false,
+            env: std::collections::HashMap::new(),
+            mounts: vec![],
+        }
+    }
+    
+    /// Create a minimal sandbox (no isolation)
+    pub fn minimal() -> Self {
+        Self::default()
+    }
+    
+    /// Create a strict sandbox (no network, limited resources)
+    pub fn strict() -> Self {
+        Self {
+            enabled: true,
+            sandbox_type: "docker".to_string(),
+            image: Some("alpine:latest".to_string()),
+            memory_mb: 256,
+            cpu_limit: 0.25,
+            timeout_seconds: 60,
+            network: false,
+            filesystem: false,
+            env: std::collections::HashMap::new(),
+            mounts: vec![],
+        }
+    }
+    
+    /// Check if sandboxing is active
+    pub fn is_active(&self) -> bool {
+        self.enabled && self.sandbox_type != "none"
+    }
+    
+    /// Set memory limit
+    pub fn with_memory(mut self, mb: u32) -> Self {
+        self.memory_mb = mb;
+        self
+    }
+    
+    /// Set timeout
+    pub fn with_timeout(mut self, seconds: u32) -> Self {
+        self.timeout_seconds = seconds;
+        self
+    }
+    
+    /// Add environment variable
+    pub fn with_env(mut self, key: &str, value: &str) -> Self {
+        self.env.insert(key.to_string(), value.to_string());
+        self
+    }
+    
+    /// Add mount
+    pub fn with_mount(mut self, source: &str, target: &str, read_only: bool) -> Self {
+        self.mounts.push(MountConfig {
+            source: source.to_string(),
+            target: target.to_string(),
+            read_only,
+        });
+        self
+    }
 }
 
 impl Default for AgentDefaults {
@@ -508,6 +631,7 @@ impl Default for AgentDefaults {
             human_delay: None,
             heartbeat_every: None,
             streaming: None,
+            sandbox: None,
         }
     }
 }
