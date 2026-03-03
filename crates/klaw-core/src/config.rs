@@ -397,6 +397,31 @@ impl Config {
         }
         false
     }
+    
+    /// Check if media size is within limits
+    pub fn is_media_size_allowed(&self, size_bytes: u64) -> bool {
+        if let Some(max_mb) = self.agents.defaults.media_max_mb {
+            let max_bytes = (max_mb as u64) * 1024 * 1024;
+            size_bytes <= max_bytes
+        } else {
+            true // No limit
+        }
+    }
+    
+    /// Get max media size in bytes
+    pub fn max_media_bytes(&self) -> Option<u64> {
+        self.agents.defaults.media_max_mb.map(|mb| (mb as u64) * 1024 * 1024)
+    }
+    
+    /// Check if response size is within limits
+    pub fn is_response_size_allowed(&self, size_bytes: u64) -> bool {
+        if let Some(max_mb) = self.agents.defaults.max_response_mb {
+            let max_bytes = (max_mb as u64) * 1024 * 1024;
+            size_bytes <= max_bytes
+        } else {
+            true // No limit
+        }
+    }
 }
 
 // ─── Gateway ──────────────────────────────────────────────────────────────────
@@ -475,6 +500,8 @@ pub struct AgentDefaults {
     pub human_delay: Option<HumanDelayConfig>,
     pub heartbeat_every: Option<String>,
     pub sandbox: Option<SandboxConfig>,
+    pub media_max_mb: Option<u32>,
+    pub max_response_mb: Option<u32>,
 }
 
 /// Sandbox configuration for agent isolation
@@ -632,6 +659,8 @@ impl Default for AgentDefaults {
             heartbeat_every: None,
             streaming: None,
             sandbox: None,
+            media_max_mb: None,
+            max_response_mb: None,
         }
     }
 }
