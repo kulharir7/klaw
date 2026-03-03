@@ -492,24 +492,26 @@ fn create_llm_provider(config: &Config) -> anyhow::Result<Box<dyn LlmProvider>> 
         }
     }
     
-    // Resolve API key from config or environment
-    let config_key: Option<&str> = config.agents.defaults.api_key.as_deref()
+    // Get provider name from model string
+    let provider_name = model_str.split('/').next().unwrap_or("anthropic");
+    
+    // Resolve API key: provider config -> env section -> agents.defaults
+    let config_key: Option<&str> = config.models.providers.as_ref()
+        .and_then(|p| p.get(provider_name))
+        .and_then(|p| p.api_key.as_deref())
+        .or_else(|| config.agents.defaults.api_key.as_deref())
         .or_else(|| {
-            // Try to get API key from env section
             config.env.as_ref().and_then(|env| {
-                let key_name = format!("{}_API_KEY", model_str.split('/').next().unwrap_or("").to_uppercase().replace('-', "_"));
+                let key_name = format!("{}_API_KEY", provider_name.to_uppercase().replace('-', "_"));
                 env.get(&key_name).map(|s| s.as_str())
             })
         });
     
-    let config_base_url: Option<&str> = config.agents.defaults.base_url.as_deref()
-        .or_else(|| {
-            // Try to get base_url from providers config
-            let provider_name = model_str.split('/').next().unwrap_or("");
-            config.models.providers.as_ref()
-                .and_then(|p| p.get(provider_name))
-                .and_then(|p| p.base_url.as_deref())
-        });
+    // Resolve base_url: provider config -> agents.defaults
+    let config_base_url: Option<&str> = config.models.providers.as_ref()
+        .and_then(|p| p.get(provider_name))
+        .and_then(|p| p.base_url.as_deref())
+        .or_else(|| config.agents.defaults.base_url.as_deref());
     
     let (provider, _model) = klaw_agent::create_provider(
         model_str,

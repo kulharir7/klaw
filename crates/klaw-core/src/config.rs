@@ -875,9 +875,12 @@ pub struct ModelsConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
+#[serde(default, rename_all = "camelCase")]
 pub struct ProviderConfig {
+    #[serde(rename = "baseUrl")]
     pub base_url: Option<String>,
+    #[serde(rename = "apiKey")]
+    pub api_key: Option<String>,
     pub api: Option<String>,
     #[serde(default)]
     pub models: Vec<ModelDefinition>,
@@ -900,6 +903,7 @@ impl Default for ProviderConfig {
     fn default() -> Self {
         Self {
             base_url: None,
+            api_key: None,
             api: None,
             models: vec![],
         }
