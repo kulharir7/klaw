@@ -2,7 +2,7 @@
 
 ## 2026-03-03 Session
 
-### Commits Made (15)
+### Commits Made (21)
 1. `92d4963` - Slash commands, enhanced tools, Discord/Slack WebSocket
 2. `4b56844` - Discord and Slack channel wire-up in gateway
 3. `9b1f486` - OpenAI-compatible Chat Completions API
@@ -15,10 +15,13 @@
 10. `7d94216` - Add Dashboard API endpoints
 11. `5f9b12b` - Add Admin Dashboard UI (web)
 12. `8fc67ae` - Add TUI command + ratatui dependencies
-13. `43e0b36` - Save complete session progress
-14. `c0c660c` - Add BindingResolver for multi-agent routing
-15. `2144518` - Add Auth Profile Manager with key rotation
-16. `0b13e66` - Add encrypted secrets store
+13. `c0c660c` - Add BindingResolver for multi-agent routing
+14. `2144518` - Add Auth Profile Manager with key rotation
+15. `0b13e66` - Add encrypted secrets store
+16. `5130f0e` - Thread bindings and channel model overrides
+17. `25d89f5` - Typing indicators config for channels
+18. `60c525f` - Streaming config with chunking modes
+19. `8409a2c` - Wire streaming config to agent defaults
 
 ### Features Implemented This Session
 
