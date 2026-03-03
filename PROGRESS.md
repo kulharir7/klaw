@@ -2,7 +2,7 @@
 
 ## 2026-03-03 Session
 
-### Commits Made (12)
+### Commits Made (15)
 1. `92d4963` - Slash commands, enhanced tools, Discord/Slack WebSocket
 2. `4b56844` - Discord and Slack channel wire-up in gateway
 3. `9b1f486` - OpenAI-compatible Chat Completions API
@@ -15,8 +15,21 @@
 10. `7d94216` - Add Dashboard API endpoints
 11. `5f9b12b` - Add Admin Dashboard UI (web)
 12. `8fc67ae` - Add TUI command + ratatui dependencies
+13. `43e0b36` - Save complete session progress
+14. `c0c660c` - Add BindingResolver for multi-agent routing
+15. `2144518` - Add Auth Profile Manager with key rotation
+16. `0b13e66` - Add encrypted secrets store
 
 ### Features Implemented This Session
+
+#### Core (`klaw-core`)
+- [x] Session management (is_idle, is_expired, cleanup)
+- [x] Session stats (total_sessions, total_messages, total_tokens)
+- [x] Config with heartbeat_every field
+- [x] AgentDefaults with all fields
+- [x] **BindingResolver** - Multi-agent routing by channel/guild/team
+- [x] **AuthProfileManager** - API key rotation with cooldowns
+- [x] **SecretsStore** - Encrypted secrets with master key
 
 #### Gateway (`klaw-gateway`)
 - [x] Slash commands handler (8 commands: /help, /status, /model, /new, /reset, /usage, /version, /agents)
