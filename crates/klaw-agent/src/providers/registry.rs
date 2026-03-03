@@ -1,6 +1,7 @@
 use crate::provider::LlmProvider;
 use crate::providers::openai::OpenAiProvider;
 use crate::providers::anthropic::AnthropicProvider;
+use crate::providers::ollama::OllamaProvider;
 use std::collections::HashMap;
 use tracing::info;
 
@@ -302,8 +303,8 @@ pub fn built_in_providers() -> HashMap<String, ProviderDef> {
     // === Local ===
     p.insert("ollama".into(), ProviderDef {
         name: "Ollama".into(),
-        base_url: "http://127.0.0.1:11434/v1".into(),
-        api_type: ApiType::OpenAiCompletions,
+        base_url: "http://127.0.0.1:11434".into(),
+        api_type: ApiType::OllamaApi,
         env_key: "OLLAMA_API_KEY".into(),
         env_keys_alt: vec![],
         auto_discover: true,
@@ -311,8 +312,8 @@ pub fn built_in_providers() -> HashMap<String, ProviderDef> {
 
     p.insert("ollama-cloud".into(), ProviderDef {
         name: "Ollama Cloud".into(),
-        base_url: "https://ollama.com/v1".into(),
-        api_type: ApiType::OpenAiCompletions,
+        base_url: "https://ollama.com".into(),
+        api_type: ApiType::OllamaApi,
         env_key: "OLLAMA_API_KEY".into(),
         env_keys_alt: vec!["OLLAMA_CLOUD_API_KEY".into()],
         auto_discover: false,
@@ -426,19 +427,13 @@ pub fn create_provider(
     // Create the appropriate provider based on API type
     let provider: Box<dyn LlmProvider> = match def.api_type {
         ApiType::OpenAiCompletions => {
-            Box::new(OpenAiProvider::new(base_url, &api_key, provider_name))
+            Box::new(OpenAiProvider::new(&base_url, &api_key, provider_name))
         }
         ApiType::AnthropicMessages => {
             Box::new(AnthropicProvider::new(&api_key))
         }
         ApiType::OllamaApi => {
-            // Ollama Cloud uses OpenAI-compatible API with Bearer token
-            let url = if base_url.ends_with("/v1") {
-                base_url.to_string()
-            } else {
-                format!("{}/v1", base_url)
-            };
-            Box::new(OpenAiProvider::new(&url, &api_key, provider_name))
+            Box::new(OllamaProvider::new(&base_url, &api_key, provider_name))
         }
     };
 

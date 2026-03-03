@@ -7,7 +7,7 @@ use crate::thinking::ThinkingLevel;
 use futures::StreamExt;
 use klaw_core::session::Session;
 use klaw_core::types::{Message, Role, StreamChunk, ToolCall, ToolResult};
-use klaw_tools::{Tool, ToolContext, registry::ToolRegistry};
+use klaw_tools::{ToolContext, registry::ToolRegistry};
 use std::sync::Arc;
 use std::time::Duration;
 use tracing::{info, warn, error};
