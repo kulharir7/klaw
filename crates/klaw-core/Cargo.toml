@@ -17,3 +17,4 @@ uuid = { workspace = true }
 dirs = { workspace = true }
 tracing = { workspace = true }
 tokio = { workspace = true }
+rand = "0.8"
