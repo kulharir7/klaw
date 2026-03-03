@@ -19,6 +19,7 @@ pub mod sessions;
 pub mod browser;
 pub mod canvas_tool;
 pub mod nodes;
+pub mod docker;
 
 use async_trait::async_trait;
 use klaw_core::types::ToolResult;
@@ -69,5 +70,6 @@ pub fn create_default_registry(brave_api_key: Option<String>) -> registry::ToolR
     reg.register(std::sync::Arc::new(browser::BrowserTool));
     reg.register(std::sync::Arc::new(canvas_tool::CanvasTool));
     reg.register(std::sync::Arc::new(nodes::NodesTool));
+    reg.register(std::sync::Arc::new(docker::DockerTool));
     reg
 }
