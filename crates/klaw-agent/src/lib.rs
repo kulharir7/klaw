@@ -20,7 +20,7 @@ pub use loop_detection::{LoopDetector, LoopStatus};
 pub use model_registry::{ModelCapabilities, ModelInfo, ModelRegistry};
 pub use prompt::SystemPromptBuilder;
 pub use provider::LlmProvider;
-pub use providers::{AnthropicProvider, OpenAiProvider, create_provider, list_providers};
+pub use providers::{AnthropicProvider, OpenAiProvider, create_provider, list_providers, ApiType, ProviderDef};
 pub use result_compaction::{ResultCompactionConfig, CompactedResult, ResultCompactor};
 pub use retry::{RetryConfig, RetryCondition, RetryState, with_retry, with_retry_status};
 pub use thinking::{ThinkingConfig, ThinkingLevel};

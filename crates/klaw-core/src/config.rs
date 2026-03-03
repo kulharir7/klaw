@@ -279,6 +279,8 @@ pub struct Config {
     pub commands: Option<CommandsConfig>,
     pub bindings: Option<Vec<Binding>>,
     pub messages: Option<MessagesConfig>,
+    #[serde(default)]
+    pub env: Option<std::collections::HashMap<String, String>>,
 }
 
 impl Default for Config {
@@ -293,6 +295,7 @@ impl Default for Config {
             commands: None,
             bindings: None,
             messages: None,
+            env: None,
         }
     }
 }
@@ -867,12 +870,59 @@ fn default_dm_policy() -> String {
 #[serde(default)]
 pub struct ModelsConfig {
     pub aliases: HashMap<String, String>,
+    #[serde(default)]
+    pub providers: Option<HashMap<String, ProviderConfig>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ProviderConfig {
+    pub base_url: Option<String>,
+    pub api: Option<String>,
+    #[serde(default)]
+    pub models: Vec<ModelDefinition>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ModelDefinition {
+    pub name: Option<String>,
+    pub id: Option<String>,
+    #[serde(default)]
+    pub context_window: Option<u64>,
+    #[serde(default)]
+    pub max_tokens: Option<u32>,
+    #[serde(default)]
+    pub reasoning: Option<bool>,
+}
+
+impl Default for ProviderConfig {
+    fn default() -> Self {
+        Self {
+            base_url: None,
+            api: None,
+            models: vec![],
+        }
+    }
+}
+
+impl Default for ModelDefinition {
+    fn default() -> Self {
+        Self {
+            name: None,
+            id: None,
+            context_window: None,
+            max_tokens: None,
+            reasoning: None,
+        }
+    }
 }
 
 impl Default for ModelsConfig {
     fn default() -> Self {
         Self {
             aliases: HashMap::new(),
+            providers: None,
         }
     }
 }

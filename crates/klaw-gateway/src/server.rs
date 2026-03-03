@@ -11,6 +11,7 @@ use klaw_core::session::SessionStore;
 use klaw_core::types::SessionKey;
 use klaw_agent::{AgentConfig, SystemPromptBuilder, run_agent};
 use klaw_agent::provider::LlmProvider;
+use klaw_agent::providers::{ProviderDef, ApiType};
 use klaw_tools::{ToolContext, create_default_registry};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -187,8 +188,8 @@ pub async fn start_gateway(config: Config) -> anyhow::Result<()> {
             let state = state.clone();
             move || health_handler_with_state(state)
         }))
-        .route("/__klaw__/canvas/{path:.*}", get(canvas_handler))
-        .route("/__klaw__/a2ui/{path:.*}", get(a2ui_handler))
+        .route("/__klaw__/canvas/{*path}", get(canvas_handler))
+        .route("/__klaw__/a2ui/{*path}", get(a2ui_handler))
         .route("/dashboard", get(dashboard_handler))
         .route("/webhook", post({
             let state = state.clone();
@@ -470,11 +471,51 @@ pub async fn start_gateway(config: Config) -> anyhow::Result<()> {
 
 fn create_llm_provider(config: &Config) -> anyhow::Result<Box<dyn LlmProvider>> {
     let model_str = config.agents.defaults.model.as_deref().unwrap_or("anthropic/claude-sonnet-4-20250514");
+    
+    // Build custom providers from config
+    let mut custom_providers = std::collections::HashMap::new();
+    if let Some(providers) = config.models.providers.as_ref() {
+        for (name, provider_config) in providers {
+            let api_type = match provider_config.api.as_deref() {
+                Some("anthropic-messages") | Some("anthropic") => klaw_agent::providers::ApiType::AnthropicMessages,
+                _ => klaw_agent::providers::ApiType::OpenAiCompletions,
+            };
+            
+            custom_providers.insert(name.clone(), klaw_agent::providers::ProviderDef {
+                name: name.clone(),
+                base_url: provider_config.base_url.clone().unwrap_or_default(),
+                api_type,
+                env_key: format!("{}_API_KEY", name.to_uppercase().replace('-', "_")),
+                env_keys_alt: vec![],
+                auto_discover: false,
+            });
+        }
+    }
+    
+    // Resolve API key from config or environment
+    let config_key: Option<&str> = config.agents.defaults.api_key.as_deref()
+        .or_else(|| {
+            // Try to get API key from env section
+            config.env.as_ref().and_then(|env| {
+                let key_name = format!("{}_API_KEY", model_str.split('/').next().unwrap_or("").to_uppercase().replace('-', "_"));
+                env.get(&key_name).map(|s| s.as_str())
+            })
+        });
+    
+    let config_base_url: Option<&str> = config.agents.defaults.base_url.as_deref()
+        .or_else(|| {
+            // Try to get base_url from providers config
+            let provider_name = model_str.split('/').next().unwrap_or("");
+            config.models.providers.as_ref()
+                .and_then(|p| p.get(provider_name))
+                .and_then(|p| p.base_url.as_deref())
+        });
+    
     let (provider, _model) = klaw_agent::create_provider(
         model_str,
-        config.agents.defaults.api_key.as_deref(),
-        config.agents.defaults.base_url.as_deref(),
-        &std::collections::HashMap::new(),
+        config_key,
+        config_base_url,
+        &custom_providers,
     )?;
     Ok(provider)
 }
