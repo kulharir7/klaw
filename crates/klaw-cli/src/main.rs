@@ -147,6 +147,8 @@ enum Commands {
         /// Shell type
         shell: String,
     },
+    /// Terminal UI (TUI) dashboard  
+    Tui,
 }
 
 #[derive(Subcommand)]
@@ -1563,6 +1565,14 @@ async fn main() -> anyhow::Result<()> {
                     println!("   Supported: bash, zsh, fish, powershell, elvish");
                 }
             }
+        }
+
+        Commands::Tui => {
+            println!("🦀 Klaw TUI Dashboard");
+            println!();
+            println!("   Use the web dashboard: http://localhost:19789/dashboard");
+            println!();
+            println!("   Or run: klaw status");
         }
     }
 
