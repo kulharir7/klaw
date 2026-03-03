@@ -500,14 +500,14 @@ pub struct AgentDefaults {
     pub human_delay: Option<HumanDelayConfig>,
     pub heartbeat_every: Option<String>,
     pub sandbox: Option<SandboxConfig>,
-    pub media_max_mb: Option<u32>,
+    pub container: Option<ContainerConfig>,
     pub max_response_mb: Option<u32>,
 }
 
-/// Sandbox configuration for agent isolation
+/// Container sandbox configuration for agent isolation
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
-pub struct SandboxConfig {
+pub struct ContainerConfig {
     /// Enable sandboxing
     pub enabled: bool,
     /// Sandbox type: "docker", "bubblewrap", "firejail", "none"
@@ -537,7 +537,7 @@ pub struct MountConfig {
     pub read_only: bool,
 }
 
-impl Default for SandboxConfig {
+impl Default for ContainerConfig {
     fn default() -> Self {
         Self {
             enabled: false,
@@ -554,8 +554,8 @@ impl Default for SandboxConfig {
     }
 }
 
-impl SandboxConfig {
-    /// Create a Docker sandbox config
+impl ContainerConfig {
+    /// Create a Docker container config
     pub fn docker(image: &str) -> Self {
         Self {
             enabled: true,
@@ -571,12 +571,12 @@ impl SandboxConfig {
         }
     }
     
-    /// Create a minimal sandbox (no isolation)
+    /// Create a minimal config (no isolation)
     pub fn minimal() -> Self {
         Self::default()
     }
     
-    /// Create a strict sandbox (no network, limited resources)
+    /// Create a strict config (no network, limited resources)
     pub fn strict() -> Self {
         Self {
             enabled: true,
@@ -659,7 +659,7 @@ impl Default for AgentDefaults {
             heartbeat_every: None,
             streaming: None,
             sandbox: None,
-            media_max_mb: None,
+            container: None,
             max_response_mb: None,
         }
     }
