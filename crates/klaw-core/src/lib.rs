@@ -1,6 +1,7 @@
 pub mod auth_profiles;
 pub mod bindings;
 pub mod config;
+pub mod cost_tracking;
 pub mod error;
 pub mod history;
 pub mod identity;
@@ -14,6 +15,7 @@ pub mod usage;
 pub use auth_profiles::{AuthProfile, AuthProfileManager, AuthKey};
 pub use bindings::{BindingResolver, MessageContext};
 pub use config::Config;
+pub use cost_tracking::{CostTracker, UsageRecord, UsageStats, ModelCostConfig};
 pub use error::KlawError;
 pub use history::{HistoryBuffer, HistoryLimits, HistoryMessage, MessageImportance};
 pub use identity::{Identity, IdentityLink, IdentityStore};
