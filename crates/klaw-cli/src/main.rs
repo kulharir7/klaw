@@ -128,6 +128,20 @@ enum Commands {
         #[arg(long)]
         force: bool,
     },
+    /// First-time setup wizard
+    Onboard {
+        /// Use defaults (non-interactive)
+        #[arg(long)]
+        default: bool,
+    },
+    /// Quick setup for a specific provider
+    Setup {
+        /// Provider to set up (anthropic, openai, ollama, gemini)
+        provider: String,
+        /// API key for the provider
+        #[arg(long)]
+        api_key: Option<String>,
+    },
     /// Generate shell completions
     Completion {
         /// Shell type
@@ -1365,6 +1379,170 @@ async fn main() -> anyhow::Result<()> {
                     println!("   Nothing to reset — {} doesn't exist.", home.display());
                 }
             }
+        }
+
+        Commands::Onboard { default } => {
+            println!("🚀 Klaw Setup Wizard");
+            println!();
+
+            let home = klaw_core::Config::home_dir();
+            let config_path = klaw_core::Config::config_path();
+
+            // Check if already configured
+            if config_path.exists() {
+                println!("   ⚠️  Config already exists at {}", config_path.display());
+                println!("   Run `klaw reset --force` to start fresh, or edit config directly.");
+                return Ok(());
+            }
+
+            if default {
+                // Non-interactive: use sensible defaults
+                println!("   Using default configuration...");
+
+                let config = klaw_core::Config::default();
+                std::fs::create_dir_all(&home)?;
+                config.save()?;
+
+                println!();
+                println!("   ✅ Created default config at {}", config_path.display());
+                println!();
+                println!("   Next steps:");
+                println!("     1. Set your API key: klaw config set agents.defaults.api_key YOUR_KEY");
+                println!("     2. Or set environment variable: ANTHROPIC_API_KEY or OPENAI_API_KEY");
+                println!("     3. Start the gateway: klaw gateway start");
+            } else {
+                // Interactive wizard
+                use std::io::{self, Write};
+
+                println!("   This wizard will help you set up Klaw.");
+                println!();
+
+                // Create home directory
+                std::fs::create_dir_all(&home)?;
+                println!("   📁 Created: {}", home.display());
+                println!();
+
+                // Provider selection
+                print!("   Select your default AI provider:\n");
+                print!("     1. Anthropic (Claude)\n");
+                print!("     2. OpenAI (GPT-4)\n");
+                print!("     3. Ollama (Local)\n");
+                print!("     4. Google Gemini\n");
+                print!("   Choice [1]: ");
+                io::stdout().flush()?;
+
+                let mut choice = String::new();
+                io::stdin().read_line(&mut choice)?;
+                let choice = choice.trim();
+
+                let (provider, model) = match choice {
+                    "2" => ("openai", "openai/gpt-4o"),
+                    "3" => ("ollama", "ollama/llama3"),
+                    "4" => ("google", "google/gemini-1.5-pro"),
+                    _ => ("anthropic", "anthropic/claude-sonnet-4-20250514"),
+                };
+
+                println!("   ✅ Selected provider: {}", provider);
+                println!();
+
+                // API key
+                println!("   API Key Setup:");
+                println!("   You can set your API key now or later via environment variable.");
+                println!("   (Press Enter to skip and set via env var)");
+                print!("   API Key: ");
+                io::stdout().flush()?;
+
+                let mut api_key = String::new();
+                io::stdin().read_line(&mut api_key)?;
+                let api_key = api_key.trim().to_string();
+
+                // Create config
+                let mut config = klaw_core::Config::default();
+                config.agents.defaults.model = Some(model.to_string());
+                if !api_key.is_empty() {
+                    config.agents.defaults.api_key = Some(api_key);
+                }
+                config.save()?;
+
+                println!();
+                println!("   ✅ Configuration saved to {}", config_path.display());
+                println!();
+                println!("   🎉 Setup complete!");
+                println!();
+                println!("   Quick start:");
+                println!("     klaw gateway start    # Start the gateway");
+                println!("     klaw test -m 'Hello'  # Test your setup");
+                println!("     klaw status           # View configuration");
+            }
+        }
+
+        Commands::Setup { provider, api_key } => {
+            println!("⚡ Quick Setup: {}", provider);
+            println!();
+
+            let (model, env_var, base_url) = match provider.to_lowercase().as_str() {
+                "anthropic" | "claude" => {
+                    ("anthropic/claude-sonnet-4-20250514", "ANTHROPIC_API_KEY", None)
+                }
+                "openai" | "gpt" => {
+                    ("openai/gpt-4o", "OPENAI_API_KEY", None)
+                }
+                "ollama" => {
+                    ("ollama/llama3", "OLLAMA_HOST", Some("http://localhost:11434"))
+                }
+                "gemini" | "google" => {
+                    ("google/gemini-1.5-pro", "GOOGLE_API_KEY", None)
+                }
+                "groq" => {
+                    ("groq/llama-3.1-70b-versatile", "GROQ_API_KEY", None)
+                }
+                "mistral" => {
+                    ("mistral/mistral-large-latest", "MISTRAL_API_KEY", None)
+                }
+                _ => {
+                    println!("❌ Unknown provider: {}", provider);
+                    println!("   Supported: anthropic, openai, ollama, gemini, groq, mistral");
+                    return Ok(());
+                }
+            };
+
+            // Check for existing API key
+            let existing_key = std::env::var(env_var).ok();
+            let key_to_use = api_key.as_ref().or(existing_key.as_ref());
+
+            if key_to_use.is_none() && provider != "ollama" {
+                println!("   ⚠️  No API key found!");
+                println!("   Set environment variable: export {}=your_key", env_var);
+                println!("   Or run: klaw setup {} --api-key YOUR_KEY", provider);
+                return Ok(());
+            }
+
+            // Load and update config
+            let mut config = klaw_core::Config::load()?;
+            config.agents.defaults.model = Some(model.to_string());
+
+            if let Some(key) = key_to_use {
+                config.agents.defaults.api_key = Some(key.clone());
+            }
+
+            if let Some(url) = base_url {
+                config.agents.defaults.base_url = Some(url.to_string());
+            }
+
+            config.save()?;
+
+            println!("   ✅ Provider: {}", provider);
+            println!("   ✅ Model: {}", model);
+            if key_to_use.is_some() {
+                println!("   ✅ API key configured");
+            }
+            if base_url.is_some() {
+                println!("   ✅ Base URL: {}", base_url.unwrap());
+            }
+            println!();
+            println!("   Config saved to {}", klaw_core::Config::config_path().display());
+            println!();
+            println!("   Test your setup: klaw test -m 'Hello'");
         }
 
         Commands::Completion { shell } => {

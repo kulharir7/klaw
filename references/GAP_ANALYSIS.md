@@ -1,5 +1,6 @@
 # Klaw vs OpenClaw — Full Gap Analysis
 > Generated: 2026-02-27 | Source: OpenClaw docs (llms.txt, 200+ pages)
+> Updated: 2026-03-03 | Reflects current Klaw implementation
 
 ## Legend
 - ✅ Done (working in Klaw)
@@ -24,8 +25,8 @@
 | Event: agent lifecycle | ✅ | Start/end/error with runId |
 | Canvas endpoint | ✅ | /__klaw__/canvas/ |
 | A2UI endpoint | ✅ | /__klaw__/a2ui/ |
-| OpenAI Chat Completions API | ❌ | `/v1/chat/completions` HTTP endpoint (OpenClaw exposes this!) |
-| Tools Invoke HTTP API | ❌ | `/v1/tools/invoke` endpoint |
+| OpenAI Chat Completions API | ✅ | `/v1/chat/completions` HTTP endpoint |
+| Tools Invoke HTTP API | ✅ | `/v1/tools/invoke` endpoint |
 | Bridge protocol | ❌ | For remote gateway access |
 | Bonjour/mDNS discovery | ❌ | Local network auto-discover |
 | Multiple gateways | ❌ | Federation support |
@@ -54,13 +55,13 @@
 | Channel model overrides (modelByChannel) | ❌ | Per-channel model pinning |
 | Channel defaults | ❌ | groupPolicy, heartbeat settings |
 | Per-channel full config | 🔸 | Basic fields only, missing: streaming, actions, groups, custom commands, retry, historyLimit, etc. |
-| Session reset (daily/idle) | ❌ | Auto-reset by time or idle |
-| Session maintenance | ❌ | prune, rotate, maxDiskBytes |
+| Session reset (daily/idle) | ✅ | is_idle(), is_expired(), cleanup methods |
+| Session maintenance | 🔸 | prune, rotate - partial |
 | Session identity links | ❌ | Cross-channel identity mapping |
 | Session thread bindings | ❌ | Thread-bound sessions |
 | Session send policy | ❌ | deny/allow rules |
-| Compaction | ❌ | Chunked summarization of long sessions |
-| Context pruning | ❌ | Prune old tool results from context |
+| Compaction | ✅ | Chunked summarization implemented |
+| Context pruning | ✅ | Prune old tool results from context |
 | Block streaming config | ❌ | Chunk-based message delivery |
 | Typing indicators config | ❌ | never/instant/thinking/message |
 | Agent identity (name, emoji, avatar) | ❌ | Per-agent branding |
@@ -96,7 +97,7 @@
 | Compaction (safeguard mode) | ❌ | Chunked summarization |
 | Memory flush before compaction | ❌ | Auto-store memories |
 | Context pruning | ❌ | Prune old tool results |
-| Streaming (partial/block/progress) | ❌ | Only non-streaming currently |
+| Streaming (partial/block/progress) | ✅ | WebSocket streaming via StreamChunk |
 | Human delay | ❌ | Randomized reply delay |
 | Thinking levels | ❌ | low/medium/high thinking |
 | Image model routing | ❌ | Route images to vision model |
