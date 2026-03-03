@@ -204,6 +204,23 @@ pub async fn start_gateway(config: Config) -> anyhow::Result<()> {
         .route("/v1/tools/invoke", post({
             let state = state.clone();
             move |headers: HeaderMap, body: Bytes| tools_invoke_handler(headers, body, state)
+        }))
+        // Dashboard API endpoints
+        .route("/api/stats", get({
+            let state = state.clone();
+            move || stats_handler(state)
+        }))
+        .route("/api/sessions", get({
+            let state = state.clone();
+            move || sessions_list_handler(state)
+        }))
+        .route("/api/usage", get({
+            let state = state.clone();
+            move || usage_handler(state)
+        }))
+        .route("/api/config", get({
+            let state = state.clone();
+            move || config_handler(state)
         }));
 
     info!("🦀 Klaw Gateway v{} starting on {}", env!("CARGO_PKG_VERSION"), addr);
@@ -1723,5 +1740,115 @@ async fn tools_invoke_handler(
         Err(e) => Json(serde_json::json!({
             "error": { "message": format!("Tool error: {}", e) }
         })),
+    }
+}
+
+// ─── Dashboard API Handlers ─────────────────────────────────────────────────────
+
+async fn stats_handler(state: Arc<RwLock<GatewayState>>) -> Json<serde_json::Value> {
+    let s = state.read().await;
+    let uptime = s.started_at.elapsed().as_secs();
+    let sessions = s.session_store.stats().await;
+    
+    Json(serde_json::json!({
+        "version": env!("CARGO_PKG_VERSION"),
+        "uptime_seconds": uptime,
+        "uptime_human": format_uptime(uptime),
+        "connected_clients": s.presence.len(),
+        "sessions": {
+            "total": sessions.total_sessions,
+            "messages": sessions.total_messages,
+            "tokens": sessions.total_tokens
+        },
+        "gateway": {
+            "host": s.config.gateway.host,
+            "port": s.config.gateway.port,
+            "auth_enabled": s.gateway_token.is_some()
+        },
+        "model": s.config.agents.defaults.model,
+        "provider": s.config.agents.defaults.provider
+    }))
+}
+
+async fn sessions_list_handler(state: Arc<RwLock<GatewayState>>) -> Json<serde_json::Value> {
+    let s = state.read().await;
+    // Return session list (simplified)
+    Json(serde_json::json!({
+        "sessions": [],
+        "total": 0,
+        "message": "Session list API - implement with session_store.list()"
+    }))
+}
+
+async fn usage_handler(state: Arc<RwLock<GatewayState>>) -> Json<serde_json::Value> {
+    let s = state.read().await;
+    let sessions = s.session_store.stats().await;
+    
+    Json(serde_json::json!({
+        "tokens": {
+            "input": 0,
+            "output": 0,
+            "total": sessions.total_tokens
+        },
+        "messages": sessions.total_messages,
+        "requests": 0,
+        "period": "all_time"
+    }))
+}
+
+async fn config_handler(state: Arc<RwLock<GatewayState>>) -> Json<serde_json::Value> {
+    let s = state.read().await;
+    
+    let telegram_enabled = match &s.config.channels.telegram {
+        Some(t) => !t.bot_token.is_empty(),
+        None => false,
+    };
+    let discord_enabled = match &s.config.channels.discord {
+        Some(d) => !d.bot_token.is_empty(),
+        None => false,
+    };
+    let slack_enabled = match &s.config.channels.slack {
+        Some(sl) => sl.bot_token.is_some(),
+        None => false,
+    };
+    
+    // Return safe config (no secrets)
+    Json(serde_json::json!({
+        "gateway": {
+            "host": s.config.gateway.host,
+            "port": s.config.gateway.port,
+            "verbose": s.config.gateway.verbose
+        },
+        "agents": {
+            "model": s.config.agents.defaults.model,
+            "provider": s.config.agents.defaults.provider,
+            "workspace": s.config.agents.defaults.workspace
+        },
+        "channels": {
+            "telegram": telegram_enabled,
+            "discord": discord_enabled,
+            "slack": slack_enabled
+        },
+        "tools": {
+            "allow": s.config.tools.allow,
+            "deny": s.config.tools.deny
+        }
+    }))
+}
+
+fn format_uptime(secs: u64) -> String {
+    let days = secs / 86400;
+    let hours = (secs % 86400) / 3600;
+    let mins = (secs % 3600) / 60;
+    let secs = secs % 60;
+    
+    if days > 0 {
+        format!("{}d {}h {}m", days, hours, mins)
+    } else if hours > 0 {
+        format!("{}h {}m {}s", hours, mins, secs)
+    } else if mins > 0 {
+        format!("{}m {}s", mins, secs)
+    } else {
+        format!("{}s", secs)
     }
 }
