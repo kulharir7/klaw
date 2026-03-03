@@ -21,6 +21,7 @@ pub mod canvas_tool;
 pub mod nodes;
 pub mod docker;
 pub mod voice;
+pub mod ocr;
 
 use async_trait::async_trait;
 use klaw_core::types::ToolResult;
